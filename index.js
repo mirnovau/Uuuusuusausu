@@ -3,29 +3,40 @@ const {
   GatewayIntentBits,
   EmbedBuilder,
   PermissionFlagsBits,
-  ChannelType,
+  SlashCommandBuilder,
   REST,
-  Routes,
-  SlashCommandBuilder
+  Routes
 } = require("discord.js");
 
 const { Pool } = require("pg");
 
+/* =========================
+   CONFIG
+========================= */
+
 const TOKEN = process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
 
-// روم اللوق
+// روم اللوق الذي أعطيتني إياه
 const LOG_CHANNEL_ID = "1523668413505863762";
 
 if (!TOKEN || !CLIENT_ID) {
-  console.error("❌ تأكد من DISCORD_TOKEN و CLIENT_ID في Railway");
+  console.error("❌ أضف DISCORD_TOKEN و CLIENT_ID في Railway Variables");
   process.exit(1);
 }
+
+/* =========================
+   DATABASE
+========================= */
 
 const db = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false }
 });
+
+/* =========================
+   CLIENT
+========================= */
 
 const client = new Client({
   intents: [
@@ -37,12 +48,13 @@ const client = new Client({
 });
 
 /* =========================
-   الأوامر
+   SLASH COMMANDS
 ========================= */
 
 const commands = [
 
-  // BAN
+  /* ===== الإدارة ===== */
+
   new SlashCommandBuilder()
     .setName("ban")
     .setDescription("إعدام / حظر عضو")
@@ -56,7 +68,6 @@ const commands = [
         .setRequired(true))
     .setDefaultMemberPermissions(PermissionFlagsBits.BanMembers),
 
-  // UNBAN
   new SlashCommandBuilder()
     .setName("unban")
     .setDescription("فك حظر عضو")
@@ -66,7 +77,6 @@ const commands = [
         .setRequired(true))
     .setDefaultMemberPermissions(PermissionFlagsBits.BanMembers),
 
-  // KICK
   new SlashCommandBuilder()
     .setName("kick")
     .setDescription("طرد عضو")
@@ -80,10 +90,9 @@ const commands = [
         .setRequired(true))
     .setDefaultMemberPermissions(PermissionFlagsBits.KickMembers),
 
-  // TIMEOUT
   new SlashCommandBuilder()
     .setName("timeout")
-    .setDescription("إعطاء Timeout")
+    .setDescription("إعطاء تايم أوت")
     .addUserOption(o =>
       o.setName("member")
         .setDescription("العضو")
@@ -100,17 +109,15 @@ const commands = [
         .setRequired(true))
     .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
 
-  // UNTIMEOUT
   new SlashCommandBuilder()
     .setName("untimeout")
-    .setDescription("إزالة Timeout")
+    .setDescription("إزالة التايم أوت")
     .addUserOption(o =>
       o.setName("member")
         .setDescription("العضو")
         .setRequired(true))
     .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
 
-  // WARN
   new SlashCommandBuilder()
     .setName("warn")
     .setDescription("إعطاء تحذير")
@@ -124,13 +131,11 @@ const commands = [
         .setRequired(true))
     .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
 
-  // WARN LIST
   new SlashCommandBuilder()
     .setName("warnlist")
-    .setDescription("عرض التحذيرات")
+    .setDescription("عرض جميع التحذيرات")
     .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
 
-  // CLEAR
   new SlashCommandBuilder()
     .setName("clear")
     .setDescription("مسح الرسائل")
@@ -142,34 +147,30 @@ const commands = [
         .setMaxValue(100))
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages),
 
-  // LOCK
   new SlashCommandBuilder()
     .setName("lock")
     .setDescription("قفل الروم")
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
 
-  // UNLOCK
   new SlashCommandBuilder()
     .setName("unlock")
     .setDescription("فتح الروم")
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
 
-  // SLOWMODE
   new SlashCommandBuilder()
     .setName("slowmode")
-    .setDescription("تفعيل Slowmode")
+    .setDescription("تفعيل السلو مود")
     .addIntegerOption(o =>
       o.setName("seconds")
-        .setDescription("الثواني")
+        .setDescription("عدد الثواني")
         .setRequired(true)
         .setMinValue(0)
         .setMaxValue(21600))
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
 
-  // ROLE
   new SlashCommandBuilder()
     .setName("role")
-    .setDescription("إعطاء أو إزالة رتبة")
+    .setDescription("إضافة أو إزالة رتبة")
     .addUserOption(o =>
       o.setName("member")
         .setDescription("العضو")
@@ -183,12 +184,11 @@ const commands = [
         .setDescription("الإجراء")
         .setRequired(true)
         .addChoices(
-          { name: "إعطاء", value: "add" },
+          { name: "إضافة", value: "add" },
           { name: "إزالة", value: "remove" }
         ))
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles),
 
-  // NICKNAME
   new SlashCommandBuilder()
     .setName("nickname")
     .setDescription("تغيير اسم عضو")
@@ -202,55 +202,48 @@ const commands = [
         .setRequired(true))
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageNicknames),
 
-  // INFO
+  /* ===== المعلومات ===== */
+
   new SlashCommandBuilder()
     .setName("info")
     .setDescription("معلومات عضو")
     .addUserOption(o =>
       o.setName("member")
-        .setDescription("العضو")
-        .setRequired(false)),
+        .setDescription("العضو")),
 
-  // SERVERINFO
   new SlashCommandBuilder()
     .setName("serverinfo")
     .setDescription("معلومات السيرفر"),
 
-  // AVATAR
   new SlashCommandBuilder()
     .setName("avatar")
     .setDescription("صورة العضو")
     .addUserOption(o =>
       o.setName("member")
-        .setDescription("العضو")
-        .setRequired(false)),
+        .setDescription("العضو")),
 
-  // BANNER
   new SlashCommandBuilder()
     .setName("banner")
     .setDescription("بنر العضو")
     .addUserOption(o =>
       o.setName("member")
-        .setDescription("العضو")
-        .setRequired(false)),
+        .setDescription("العضو")),
 
-  // ROLES
   new SlashCommandBuilder()
     .setName("roles")
-    .setDescription("عرض رتب العضو")
+    .setDescription("رتب العضو")
     .addUserOption(o =>
       o.setName("member")
-        .setDescription("العضو")
-        .setRequired(false)),
+        .setDescription("العضو")),
 
-  // AUTOREPLY
+  /* ===== الردود ===== */
+
   new SlashCommandBuilder()
     .setName("autoreply")
     .setDescription("إدارة الردود التلقائية")
-
     .addSubcommand(s =>
       s.setName("add")
-        .setDescription("إضافة رد")
+        .setDescription("إضافة رد تلقائي")
         .addStringOption(o =>
           o.setName("trigger")
             .setDescription("الكلمة")
@@ -259,27 +252,24 @@ const commands = [
           o.setName("response")
             .setDescription("الرد")
             .setRequired(true)))
-
     .addSubcommand(s =>
       s.setName("remove")
-        .setDescription("حذف رد")
+        .setDescription("حذف رد تلقائي")
         .addStringOption(o =>
           o.setName("trigger")
             .setDescription("الكلمة")
             .setRequired(true)))
-
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
 
-  // LIST
   new SlashCommandBuilder()
     .setName("list")
     .setDescription("عرض الردود التلقائية"),
 
-  // SHORTCUT SET
+  /* ===== الاختصارات ===== */
+
   new SlashCommandBuilder()
     .setName("shortcut")
     .setDescription("إدارة الاختصارات")
-
     .addSubcommand(s =>
       s.setName("set")
         .setDescription("إنشاء اختصار")
@@ -291,7 +281,6 @@ const commands = [
           o.setName("command")
             .setDescription("مثال: lock")
             .setRequired(true)))
-
     .addSubcommand(s =>
       s.setName("remove")
         .setDescription("حذف اختصار")
@@ -299,44 +288,26 @@ const commands = [
           o.setName("shortcut")
             .setDescription("الاختصار")
             .setRequired(true)))
-
     .addSubcommand(s =>
       s.setName("list")
         .setDescription("عرض الاختصارات"))
-
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
 
-].map(x => x.toJSON());
+  /* ===== إضافية ===== */
 
+  new SlashCommandBuilder()
+    .setName("me")
+    .setDescription("معلومات عن البوت"),
 
-/* =========================
-   LOG SYSTEM
-========================= */
+  new SlashCommandBuilder()
+    .setName("logs")
+    .setDescription("اختبار نظام اللوق")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
 
-async function sendLog(guild, title, description) {
-
-  const channel =
-    guild.channels.cache.get(LOG_CHANNEL_ID);
-
-  if (!channel) return;
-
-  const embed = new EmbedBuilder()
-    .setColor(0xF1C40F)
-    .setTitle(title)
-    .setDescription(description)
-    .setFooter({
-      text: "Powered by .v5d."
-    })
-    .setTimestamp();
-
-  await channel.send({
-    embeds: [embed]
-  }).catch(() => {});
-}
-
+].map(command => command.toJSON());
 
 /* =========================
-   DATABASE
+   DATABASE SETUP
 ========================= */
 
 async function setupDatabase() {
@@ -372,8 +343,33 @@ async function setupDatabase() {
     )
   `);
 
+  console.log("✅ PostgreSQL جاهز");
 }
 
+/* =========================
+   LOG FUNCTION
+========================= */
+
+async function sendLog(guild, title, description) {
+
+  const channel = guild.channels.cache.get(LOG_CHANNEL_ID);
+
+  if (!channel) {
+    console.log("⚠️ روم اللوق غير موجود");
+    return;
+  }
+
+  const embed = new EmbedBuilder()
+    .setColor(0xF1C40F)
+    .setTitle(title)
+    .setDescription(description)
+    .setFooter({ text: ".v5d." })
+    .setTimestamp();
+
+  await channel.send({
+    embeds: [embed]
+  }).catch(console.error);
+}
 
 /* =========================
    READY
@@ -387,9 +383,8 @@ client.once("ready", async () => {
 
     await setupDatabase();
 
-    const rest =
-      new REST({ version: "10" })
-        .setToken(TOKEN);
+    const rest = new REST({ version: "10" })
+      .setToken(TOKEN);
 
     await rest.put(
       Routes.applicationCommands(CLIENT_ID),
@@ -398,20 +393,16 @@ client.once("ready", async () => {
       }
     );
 
-    console.log("✅ تم تسجيل جميع الأوامر");
-    console.log("✅ PostgreSQL متصل");
+    console.log(`✅ تم تسجيل ${commands.length} أمر`);
+    console.log("🚀 البوت يعمل");
 
   } catch (error) {
 
-    console.error(
-      "❌ خطأ:",
-      error
-    );
+    console.error("❌ خطأ أثناء التشغيل:", error);
 
   }
 
 });
-
 
 /* =========================
    INTERACTIONS
@@ -423,370 +414,419 @@ client.on("interactionCreate", async interaction => {
 
   try {
 
-    // سيتم وضع تنفيذ الأوامر هنا في الجزء الثاني
+    /* ===== ME ===== */
 
-  } catch (error) {
+    if (interaction.commandName === "me") {
 
-    console.error(error);
+      return interaction.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(0xF1C40F)
+            .setTitle("🤖 معلومات البوت")
+            .setDescription(
+              "بوت إدارة متكامل\n\n" +
+              "السيرفر: **MR NOVA**\n" +
+              "Powered by **.v5d.**"
+            )
+        ]
+      });
 
-    if (!interaction.replied) {
+    }
+
+    /* ===== LOGS ===== */
+
+    if (interaction.commandName === "logs") {
+
+      await sendLog(
+        interaction.guild,
+        "📋 اختبار اللوق",
+        `تم اختبار نظام اللوق بواسطة ${interaction.user}`
+      );
+
+      return interaction.reply({
+        content: "✅ تم إرسال اختبار اللوق.",
+        ephemeral: true
+      });
+
+    }
+
+    /* ===== BAN ===== */
+
+    if (interaction.commandName === "ban") {
+
+      const user = interaction.options.getUser("member");
+      const reason = interaction.options.getString("reason");
+
+      const member = await interaction.guild.members
+        .fetch(user.id)
+        .catch(() => null);
+
+      if (!member || !member.bannable) {
+        return interaction.reply({
+          content: "❌ لا أستطيع إعدام هذا العضو.",
+          ephemeral: true
+        });
+      }
+
+      await member.ban({ reason });
+
+      const embed = new EmbedBuilder()
+        .setColor(0xFF0000)
+        .setTitle("🔨 تم الإعدام")
+        .setDescription(
+          `تم اعدام المعدوم ${user}\n\n` +
+          `من قبل ${interaction.user}\n\n` +
+          `**السبب:** ${reason}`
+        )
+        .setThumbnail(user.displayAvatarURL())
+        .setTimestamp();
 
       await interaction.reply({
-        content: "❌ حدث خطأ.",
+        embeds: [embed]
+      });
+
+      await sendLog(
+        interaction.guild,
+        "🔨 إعدام / Ban",
+        `**المعدوم:** ${user}\n` +
+        `**الإداري:** ${interaction.user}\n` +
+        `**السبب:** ${reason}`
+      );
+
+      return;
+    }
+
+    /* ===== UNBAN ===== */
+
+    if (interaction.commandName === "unban") {
+
+      const id = interaction.options.getString("userid");
+
+      await interaction.guild.members.unban(id);
+
+      await interaction.reply(
+        `🔓 تم فك الحظر عن <@${id}>.`
+      );
+
+      await sendLog(
+        interaction.guild,
+        "🔓 Unban",
+        `**ID:** \`${id}\`\n` +
+        `**بواسطة:** ${interaction.user}`
+      );
+
+      return;
+    }
+
+    /* ===== KICK ===== */
+
+    if (interaction.commandName === "kick") {
+
+      const user = interaction.options.getUser("member");
+      const reason = interaction.options.getString("reason");
+
+      const member = await interaction.guild.members
+        .fetch(user.id)
+        .catch(() => null);
+
+      if (!member || !member.kickable) {
+        return interaction.reply({
+          content: "❌ لا أستطيع طرد هذا العضو.",
+          ephemeral: true
+        });
+      }
+
+      await member.kick(reason);
+
+      await interaction.reply(
+        `👢 تم طرد ${user}\n**السبب:** ${reason}`
+      );
+
+      await sendLog(
+        interaction.guild,
+        "👢 Kick",
+        `**العضو:** ${user}\n` +
+        `**بواسطة:** ${interaction.user}\n` +
+        `**السبب:** ${reason}`
+      );
+
+      return;
+    }
+
+    /* ===== TIMEOUT ===== */
+
+    if (interaction.commandName === "timeout") {
+
+      const user = interaction.options.getUser("member");
+      const minutes = interaction.options.getInteger("minutes");
+      const reason = interaction.options.getString("reason");
+
+      const member = await interaction.guild.members
+        .fetch(user.id)
+        .catch(() => null);
+
+      if (!member || !member.moderatable) {
+        return interaction.reply({
+          content: "❌ لا أستطيع إعطاء Timeout.",
+          ephemeral: true
+        });
+      }
+
+      await member.timeout(minutes * 60 * 1000, reason);
+
+      await interaction.reply(
+        `⏳ تم إعطاء ${user} Timeout لمدة **${minutes} دقيقة**.\n` +
+        `**السبب:** ${reason}`
+      );
+
+      await sendLog(
+        interaction.guild,
+        "⏳ Timeout",
+        `**العضو:** ${user}\n` +
+        `**بواسطة:** ${interaction.user}\n` +
+        `**المدة:** ${minutes} دقيقة\n` +
+        `**السبب:** ${reason}`
+      );
+
+      return;
+    }
+
+    /* ===== UNTIMEOUT ===== */
+
+    if (interaction.commandName === "untimeout") {
+
+      const user = interaction.options.getUser("member");
+
+      const member = await interaction.guild.members
+        .fetch(user.id)
+        .catch(() => null);
+
+      if (!member) {
+        return interaction.reply("❌ العضو غير موجود.");
+      }
+
+      await member.timeout(null);
+
+      await interaction.reply(
+        `✅ تم إزالة Timeout عن ${user}.`
+      );
+
+      await sendLog(
+        interaction.guild,
+        "✅ Untimeout",
+        `**العضو:** ${user}\n` +
+        `**بواسطة:** ${interaction.user}`
+      );
+
+      return;
+    }
+
+    /* ===== WARN ===== */
+
+    if (interaction.commandName === "warn") {
+
+      const user = interaction.options.getUser("member");
+      const reason = interaction.options.getString("reason");
+
+      await db.query(
+        `INSERT INTO warns
+        (guild_id,user_id,moderator_id,reason)
+        VALUES ($1,$2,$3,$4)`,
+        [
+          interaction.guildId,
+          user.id,
+          interaction.user.id,
+          reason
+        ]
+      );
+
+      const count = await db.query(
+        `SELECT COUNT(*) FROM warns
+         WHERE guild_id=$1 AND user_id=$2`,
+        [
+          interaction.guildId,
+          user.id
+        ]
+      );
+
+      const warnNumber = count.rows[0].count;
+
+      await interaction.reply(
+        `⚠️ تم إعطاء ${user} تحذير.\n**السبب:** ${reason}`
+      );
+
+      await user.send(
+        `⚠️ **لقد تم إعطاءك تحذير**\n\n` +
+        `**بواسطة:** ${interaction.user}\n` +
+        `**السبب:** ${reason}\n` +
+        `**السيرفر:** ${interaction.guild.name}\n` +
+        `**رقم التحذير:** #${warnNumber}`
+      ).catch(() => {});
+
+      await sendLog(
+        interaction.guild,
+        "⚠️ Warn",
+        `**العضو:** ${user}\n` +
+        `**بواسطة:** ${interaction.user}\n` +
+        `**السبب:** ${reason}\n` +
+        `**رقم التحذير:** #${warnNumber}`
+      );
+
+      return;
+    }
+
+    /* ===== WARNLIST ===== */
+
+    if (interaction.commandName === "warnlist") {
+
+      const result = await db.query(
+        `SELECT * FROM warns
+         WHERE guild_id=$1
+         ORDER BY created_at DESC`,
+        [interaction.guildId]
+      );
+
+      if (!result.rows.length) {
+        return interaction.reply("✅ لا توجد تحذيرات.");
+      }
+
+      const text = result.rows
+        .slice(0, 25)
+        .map((w, i) =>
+          `**${i + 1}.** <@${w.user_id}>\n` +
+          `السبب: ${w.reason}\n` +
+          `بواسطة: <@${w.moderator_id}>`
+        )
+        .join("\n\n");
+
+      return interaction.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(0xF1C40F)
+            .setTitle("⚠️ Warn List")
+            .setDescription(text)
+        ]
+      });
+
+    }
+
+    /* ===== CLEAR ===== */
+
+    if (interaction.commandName === "clear") {
+
+      const amount = interaction.options.getInteger("amount");
+
+      await interaction.channel.bulkDelete(amount, true);
+
+      await interaction.reply({
+        content: `🧹 تم مسح **${amount}** رسالة.`,
         ephemeral: true
-      }).catch(() => {});
-
-    }
-
-  }
-
-});
-
-
-/* =========================
-   AUTO REPLIES
-========================= */
-
-client.on("messageCreate", async message => {
-
-  if (!message.guild || message.author.bot)
-    return;
-
-  const text =
-    message.content
-      .trim()
-      .toLowerCase();
-
-  if (!text) return;
-
-  const result = await db.query(
-    `
-    SELECT response
-    FROM autoreplies
-    WHERE guild_id=$1
-    AND LOWER(trigger)=LOWER($2)
-    `,
-    [
-      message.guild.id,
-      text
-    ]
-  ).catch(() => ({ rows: [] }));
-
-  if (result.rows.length) {
-
-    await message.reply(
-      result.rows[0].response
-    ).catch(() => {});
-
-  }
-
-});
-
-
-/* =========================
-   MESSAGE LOGS
-========================= */
-
-client.on("messageDelete", async message => {
-
-  if (!message.guild) return;
-  if (message.author?.bot) return;
-
-  await sendLog(
-    message.guild,
-    "🗑️ حذف رسالة",
-    `**العضو:** ${message.author || "غير معروف"}\n` +
-    `**الروم:** ${message.channel}\n` +
-    `**المحتوى:** ${message.content || "غير معروف"}`
-  );
-
-});
-
-
-client.on("messageUpdate", async (oldMessage, newMessage) => {
-
-  if (!oldMessage.guild) return;
-  if (oldMessage.author?.bot) return;
-
-  if (
-    oldMessage.content ===
-    newMessage.content
-  ) return;
-
-  await sendLog(
-    oldMessage.guild,
-    "✏️ تعديل رسالة",
-    `**العضو:** ${oldMessage.author}\n` +
-    `**الروم:** ${oldMessage.channel}\n\n` +
-    `**قبل:** ${oldMessage.content || "فارغة"}\n` +
-    `**بعد:** ${newMessage.content || "فارغة"}`
-  );
-
-});
-
-
-/* =========================
-   MEMBER LOGS
-========================= */
-
-client.on("guildMemberAdd", async member => {
-
-  await sendLog(
-    member.guild,
-    "📥 دخول عضو",
-    `**العضو:** ${member}\n` +
-    `**ID:** \`${member.id}\``
-  );
-
-});
-
-
-client.on("guildMemberRemove", async member => {
-
-  await sendLog(
-    member.guild,
-    "📤 خروج عضو",
-    `**العضو:** ${member.user.username}\n` +
-    `**ID:** \`${member.id}\``
-  );
-
-});
-
-
-/* =========================
-   SHORTCUTS
-========================= */
-
-client.on("messageCreate", async message => {
-  if (!message.guild || message.author.bot) return;
-
-  const text = message.content.trim().toLowerCase();
-
-  if (!text) return;
-
-  const result = await db.query(
-    `SELECT command FROM shortcuts
-     WHERE guild_id=$1 AND LOWER(shortcut)=LOWER($2)`,
-    [message.guild.id, text]
-  ).catch(() => ({ rows: [] }));
-
-  if (!result.rows.length) return;
-
-  const command = result.rows[0].command;
-
-  /*
-    الاختصارات هنا ترسل رسالة للبوت.
-    مثال:
-    قفل -> lock
-    فتح -> unlock
-    طرد -> kick
-    حظر -> ban
-    تحذير -> warn
-  */
-
-  const allowed = [
-    "lock",
-    "unlock",
-    "kick",
-    "ban",
-    "warn",
-    "clear",
-    "slowmode",
-    "unban",
-    "untimeout"
-  ];
-
-  if (!allowed.includes(command)) return;
-
-  /*
-    ملاحظة:
-    Discord لا يسمح بتحويل رسالة عادية مباشرة إلى Slash Command
-    باسم المستخدم، لذلك نستخدم نظام اختصارات داخلي.
-  */
-
-  if (command === "lock") {
-    if (
-      !message.member.permissions.has(
-        PermissionFlagsBits.ManageChannels
-      )
-    ) return;
-
-    await message.channel.permissionOverwrites.edit(
-      message.guild.roles.everyone,
-      { SendMessages: false }
-    );
-
-    await message.channel.send("🔒 تم قفل الروم.");
-
-    await sendLog(
-      message.guild,
-      "🔒 Lock",
-      `**الروم:** ${message.channel}\n` +
-      `**بواسطة:** ${message.author}`
-    );
-
-    return;
-  }
-
-  if (command === "unlock") {
-    if (
-      !message.member.permissions.has(
-        PermissionFlagsBits.ManageChannels
-      )
-    ) return;
-
-    await message.channel.permissionOverwrites.edit(
-      message.guild.roles.everyone,
-      { SendMessages: true }
-    );
-
-    await message.channel.send("🔓 تم فتح الروم.");
-
-    await sendLog(
-      message.guild,
-      "🔓 Unlock",
-      `**الروم:** ${message.channel}\n` +
-      `**بواسطة:** ${message.author}`
-    );
-
-    return;
-  }
-
-  if (command === "kick") {
-    if (
-      !message.member.permissions.has(
-        PermissionFlagsBits.KickMembers
-      )
-    ) return;
-
-    await message.channel.send(
-      "❌ لا يمكن استخدام Kick بالاختصار بدون تحديد العضو.\n" +
-      "استخدم `/kick`."
-    );
-
-    return;
-  }
-
-  if (command === "ban") {
-    if (
-      !message.member.permissions.has(
-        PermissionFlagsBits.BanMembers
-      )
-    ) return;
-
-    await message.channel.send(
-      "❌ لا يمكن استخدام Ban بالاختصار بدون تحديد العضو والسبب.\n" +
-      "استخدم `/ban`."
-    );
-
-    return;
-  }
-
-  if (command === "warn") {
-    if (
-      !message.member.permissions.has(
-        PermissionFlagsBits.ModerateMembers
-      )
-    ) return;
-
-    await message.channel.send(
-      "❌ لا يمكن استخدام Warn بالاختصار بدون تحديد العضو والسبب.\n" +
-      "استخدم `/warn`."
-    );
-
-    return;
-  }
-
-});
-
-
-/* =========================
-   ROLE UPDATE LOG
-========================= */
-
-client.on(
-  "guildMemberUpdate",
-  async (oldMember, newMember) => {
-
-    const oldRoles = oldMember.roles.cache;
-    const newRoles = newMember.roles.cache;
-
-    const addedRoles = newRoles.filter(
-      role => !oldRoles.has(role.id)
-    );
-
-    const removedRoles = oldRoles.filter(
-      role => !newRoles.has(role.id)
-    );
-
-    for (const role of addedRoles.values()) {
+      });
 
       await sendLog(
-        newMember.guild,
-        "🎭 إضافة رتبة",
-        `**العضو:** ${newMember}\n` +
-        `**الرتبة:** ${role}\n` +
-        `**ID العضو:** \`${newMember.id}\``
+        interaction.guild,
+        "🧹 حذف رسائل",
+        `**الروم:** ${interaction.channel}\n` +
+        `**العدد:** ${amount}\n` +
+        `**بواسطة:** ${interaction.user}`
       );
 
+      return;
     }
 
-    for (const role of removedRoles.values()) {
-
-      await sendLog(
-        newMember.guild,
-        "🎭 إزالة رتبة",
-        `**العضو:** ${newMember}\n` +
-        `**الرتبة:** ${role}\n` +
-        `**ID العضو:** \`${newMember.id}\``
-      );
-
-    }
-
-  }
-);
-
-
-/* =========================
-   CHANNEL LOCK LOG
-========================= */
-
-client.on(
-  "channelUpdate",
-  async (oldChannel, newChannel) => {
-
-    if (!newChannel.guild) return;
+    /* ===== LOCK / UNLOCK ===== */
 
     if (
-      oldChannel.rateLimitPerUser !==
-      newChannel.rateLimitPerUser
+      interaction.commandName === "lock" ||
+      interaction.commandName === "unlock"
     ) {
 
-      await sendLog(
-        newChannel.guild,
-        "🐌 تغيير Slowmode",
-        `**الروم:** ${newChannel}\n` +
-        `**قبل:** ${oldChannel.rateLimitPerUser || 0} ثانية\n` +
-        `**بعد:** ${newChannel.rateLimitPerUser || 0} ثانية`
+      const locked = interaction.commandName === "lock";
+
+      await interaction.channel.permissionOverwrites.edit(
+        interaction.guild.roles.everyone,
+        {
+          SendMessages: !locked
+        }
       );
 
+      await interaction.reply(
+        locked
+          ? "🔒 تم قفل الروم."
+          : "🔓 تم فتح الروم."
+      );
+
+      await sendLog(
+        interaction.guild,
+        locked ? "🔒 Lock" : "🔓 Unlock",
+        `**الروم:** ${interaction.channel}\n` +
+        `**بواسطة:** ${interaction.user}`
+      );
+
+      return;
     }
 
-  }
-);
+    /* ===== SLOWMODE ===== */
 
+    if (interaction.commandName === "slowmode") {
 
-/* =========================
-   BOT ERROR HANDLING
-========================= */
+      const seconds =
+        interaction.options.getInteger("seconds");
 
-process.on("unhandledRejection", error => {
-  console.error("❌ Unhandled Rejection:", error);
-});
+      await interaction.channel.setRateLimitPerUser(seconds);
 
-process.on("uncaughtException", error => {
-  console.error("❌ Uncaught Exception:", error);
-});
+      await interaction.reply(
+        seconds === 0
+          ? "✅ تم إلغاء Slowmode."
+          : `🐌 تم تفعيل Slowmode لمدة **${seconds} ثانية**.`
+      );
 
+      return;
+    }
 
-console.log("🚀 Starting bot...");
+    /* ===== ROLE ===== */
+
+    if (interaction.commandName === "role") {
+
+      const user = interaction.options.getUser("member");
+      const role = interaction.options.getRole("role");
+      const action = interaction.options.getString("action");
+
+      const member =
+        await interaction.guild.members.fetch(user.id);
+
+      if (action === "add") {
+
+        await member.roles.add(role);
+
+        await interaction.reply(
+          `✅ تم إعطاء ${user} رتبة ${role}.`
+        );
+
+      } else {
+
+        await member.roles.remove(role);
+
+        await interaction.reply(
+          `✅ تم إزالة رتبة ${role} من ${user}.`
+        );
+
+      }
+
+      await sendLog(
+        interaction.guild,
+        "🎭 تغيير رتبة",
+        `**العضو:** ${user}\n` +
+        `**الرتبة:** ${role}\n` +
+        `**الإجراء:** ${action === "add" ? "إضافة" : "إزالة"}\n` +
+        `**بواسطة:** ${interaction.user}`
+      );
+
+      return;
+    }
+
+    /* ===== NICKNAME ===== */
+
+    if (interaction.commandName === "nickname") {
+
+      const user = interaction.options.getUser("member")
