@@ -3,6 +3,7 @@
     "start": "node index.js"
   },
   "dependencies": {
-    "discord.js": "^14"
+    "discord.js": "^14",
+    "pg": "^8"
   }
 }
