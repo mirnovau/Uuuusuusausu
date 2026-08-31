@@ -4,6 +4,6 @@
   },
   "dependencies": {
     "discord.js": "^14",
-    "pg": "^8"
+    "pg": "^8.16.3"
   }
 }
