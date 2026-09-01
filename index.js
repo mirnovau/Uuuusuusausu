@@ -1,18 +1,17 @@
 const {
   Client,
   GatewayIntentBits,
+  Partials,
   EmbedBuilder,
   PermissionFlagsBits,
   SlashCommandBuilder,
   REST,
   Routes,
-  ChannelType,
+  AuditLogEvent,
   ActionRowBuilder,
   StringSelectMenuBuilder,
   StringSelectMenuOptionBuilder,
-  ButtonBuilder,
-  ButtonStyle,
-  AuditLogEvent
+  ChannelType
 } = require("discord.js");
 
 const { Pool } = require("pg");
@@ -23,6 +22,7 @@ const { Pool } = require("pg");
 
 const TOKEN = process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
+const DATABASE_URL = process.env.DATABASE_URL;
 
 const OWNER_ID = "1179433017064820747";
 
@@ -36,7 +36,7 @@ if (!CLIENT_ID) {
   process.exit(1);
 }
 
-if (!process.env.DATABASE_URL) {
+if (!DATABASE_URL) {
   console.error("❌ DATABASE_URL غير موجود");
   process.exit(1);
 }
@@ -46,7 +46,7 @@ if (!process.env.DATABASE_URL) {
 ========================================================= */
 
 const db = new Pool({
-  connectionString: process.env.DATABASE_URL,
+  connectionString: DATABASE_URL,
   ssl: {
     rejectUnauthorized: false
   }
@@ -62,157 +62,156 @@ const client = new Client({
     GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
-    GatewayIntentBits.GuildModeration,
     GatewayIntentBits.GuildVoiceStates,
-    GatewayIntentBits.GuildMessageReactions
+    GatewayIntentBits.GuildMessageReactions,
+    GatewayIntentBits.GuildModeration,
+    GatewayIntentBits.GuildExpressions
+  ],
+
+  partials: [
+    Partials.Message,
+    Partials.Channel,
+    Partials.Reaction,
+    Partials.User
   ]
 });
-
-/* =========================================================
-   BOT STATUS
-========================================================= */
-
-let botStartedAt = null;
-let lastReadyAt = null;
-let lastDisconnectAt = null;
-
-/* =========================================================
-   OWNER
-========================================================= */
-
-function isOwner(interaction) {
-  return interaction.user.id === OWNER_ID;
-}
-
-/* =========================================================
-   COMMAND PERMISSIONS
-========================================================= */
-
-const commandPermissions = {
-  ban: PermissionFlagsBits.BanMembers,
-  unban: PermissionFlagsBits.BanMembers,
-  kick: PermissionFlagsBits.KickMembers,
-  timeout: PermissionFlagsBits.ModerateMembers,
-  untimeout: PermissionFlagsBits.ModerateMembers,
-  warn: PermissionFlagsBits.ModerateMembers,
-  warnlist: PermissionFlagsBits.ModerateMembers,
-
-  clear: PermissionFlagsBits.ManageMessages,
-
-  lock: PermissionFlagsBits.ManageChannels,
-  unlock: PermissionFlagsBits.ManageChannels,
-  slowmode: PermissionFlagsBits.ManageChannels,
-
-  role: PermissionFlagsBits.ManageRoles,
-  nickname: PermissionFlagsBits.ManageNicknames,
-
-  autoreply: PermissionFlagsBits.ManageGuild,
-  shortcut: PermissionFlagsBits.ManageGuild,
-
-  logsetup: PermissionFlagsBits.ManageGuild,
-  logs: PermissionFlagsBits.ManageGuild,
-  log: PermissionFlagsBits.ManageGuild
-};
-
-function checkCommandPermission(interaction) {
-  if (isOwner(interaction)) {
-    return true;
-  }
-
-  const required =
-    commandPermissions[interaction.commandName];
-
-  if (!required) {
-    return true;
-  }
-
-  return (
-    interaction.memberPermissions?.has(required) ??
-    false
-  );
-}
 
 /* =========================================================
    LOG TYPES
 ========================================================= */
 
 const LOG_TYPES = {
-  member_join: "إنضمام الأعضاء",
-  member_leave: "خروج الأعضاء",
-  member_kick: "طرد الأعضاء",
+  member_join: {
+    name: "إنضمام الأعضاء",
+    emoji: "📥"
+  },
 
-  ban: "حظر الأعضاء",
-  unban: "إزالة حظر الأعضاء",
+  mute: {
+    name: "سجل الميوت",
+    emoji: "🔇"
+  },
 
-  timeout: "إضافة Timeout",
-  untimeout: "إزالة Timeout",
-  mute: "سجل الميوت",
+  channel_permissions: {
+    name: "تحديث صلاحيات الرومات",
+    emoji: "🔐"
+  },
 
-  voice_join: "دخول صوتي",
-  voice_leave: "خروج صوتي",
-  voice_kick: "طرد صوتي",
-  voice_move: "تنقل/سحب الأعضاء",
+  channel_update: {
+    name: "تحديث الرومات",
+    emoji: "📝"
+  },
 
-  voice_speak: "منع/سماح التحدث",
-  voice_listen: "منع/سماح الإستماع",
+  channel_create_delete: {
+    name: "إنشاء وحذف الرومات",
+    emoji: "📁"
+  },
 
-  guild_update: "تحديث إعدادات السيرفر",
+  member_leave: {
+    name: "خروج الأعضاء",
+    emoji: "📤"
+  },
 
-  channel_update: "تحديث الرومات",
-  channel_create: "إنشاء الرومات",
-  channel_delete: "حذف الرومات",
-  channel_permissions: "تحديث صلاحيات الرومات",
+  member_kick: {
+    name: "طرد الأعضاء",
+    emoji: "👢"
+  },
 
-  message_delete: "الرسائل المحذوفة",
-  message_bulk_delete: "حذف مجموعة رسائل",
-  message_update: "تعديل الرسائل",
+  ban: {
+    name: "حظر الأعضاء",
+    emoji: "🔨"
+  },
 
-  role_create: "إنشاء الرُتب",
-  role_delete: "حذف الرُتب",
-  role_update: "تحديث الرُتب",
-  role_permissions: "تحديث صلاحيات الرُتب",
+  unban: {
+    name: "إزالة حظر الأعضاء",
+    emoji: "♻️"
+  },
 
-  member_roles: "تحديث رُتب الأعضاء",
+  voice: {
+    name: "دخول/خروج/طرد صوتي",
+    emoji: "🎙️"
+  },
 
-  emoji_create: "إضافة إيموجي",
-  emoji_update: "تعديل إيموجي",
-  emoji_delete: "حذف إيموجي",
+  voice_permissions: {
+    name: "منع/سماح الإستماع والتحدث",
+    emoji: "🎧"
+  },
 
-  sticker_create: "إضافة ستيكر",
-  sticker_update: "تعديل ستيكر",
-  sticker_delete: "حذف ستيكر",
+  guild_update: {
+    name: "تحديث إعدادات السيرفر",
+    emoji: "⚙️"
+  },
 
-  reaction_add: "إضافة رياكشن"
+  message_bulk_delete: {
+    name: "حذف مجموعة رسائل",
+    emoji: "🗑️"
+  },
+
+  member_move: {
+    name: "تنقل/سحب الأعضاء",
+    emoji: "↔️"
+  },
+
+  emoji: {
+    name: "إضافة/تعديل/حذف إيموجي",
+    emoji: "😀"
+  },
+
+  sticker: {
+    name: "إضافة/تعديل/حذف ستيكر",
+    emoji: "🏷️"
+  },
+
+  reaction: {
+    name: "إضافة رياكشن",
+    emoji: "❤️"
+  },
+
+  member_roles: {
+    name: "تحديث رُتب الأعضاء",
+    emoji: "👤"
+  },
+
+  message_delete: {
+    name: "الرسائل المحذوفة",
+    emoji: "❌"
+  },
+
+  role_create_delete: {
+    name: "إنشاء وحذف الرُتب",
+    emoji: "➕"
+  },
+
+  role_update: {
+    name: "تحديث الرُتب",
+    emoji: "✏️"
+  },
+
+  role_permissions: {
+    name: "تحديث صلاحيات الرُتب",
+    emoji: "🛡️"
+  },
+
+  timeout: {
+    name: "إضافة/إزالة تايم أوت",
+    emoji: "⏱️"
+  }
 };
 
-/* =========================================================
-   DEFAULT LOG SETTINGS
-========================================================= */
-
-function defaultLogTypes() {
-  const obj = {};
-
-  for (const key of Object.keys(LOG_TYPES)) {
-    obj[key] = true;
-  }
-
-  return obj;
-}
+const LOG_TYPE_KEYS = Object.keys(LOG_TYPES);
 
 /* =========================================================
    DATABASE SETUP
 ========================================================= */
 
 async function setupDatabase() {
-
   await db.query(`
     CREATE TABLE IF NOT EXISTS warns (
       id SERIAL PRIMARY KEY,
       guild_id TEXT NOT NULL,
       user_id TEXT NOT NULL,
       moderator_id TEXT NOT NULL,
-      reason TEXT NOT NULL,
-      created_at TIMESTAMPTZ DEFAULT NOW()
+      reason TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   `);
 
@@ -230,9 +229,9 @@ async function setupDatabase() {
     CREATE TABLE IF NOT EXISTS shortcuts (
       id SERIAL PRIMARY KEY,
       guild_id TEXT NOT NULL,
-      shortcut TEXT NOT NULL,
+      name TEXT NOT NULL,
       command TEXT NOT NULL,
-      UNIQUE(guild_id, shortcut)
+      UNIQUE(guild_id, name)
     )
   `);
 
@@ -246,31 +245,40 @@ async function setupDatabase() {
   await db.query(`
     CREATE TABLE IF NOT EXISTS log_settings (
       guild_id TEXT PRIMARY KEY,
-      enabled BOOLEAN DEFAULT TRUE,
-      types JSONB NOT NULL
+      enabled BOOLEAN NOT NULL DEFAULT TRUE,
+      settings JSONB NOT NULL DEFAULT '{}'::jsonb
     )
   `);
 
   await db.query(`
     CREATE TABLE IF NOT EXISTS bot_sessions (
       id SERIAL PRIMARY KEY,
-      started_at TIMESTAMPTZ NOT NULL,
-      disconnected_at TIMESTAMPTZ
+      started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      ended_at TIMESTAMP
     )
   `);
 
-  console.log("✅ PostgreSQL جاهز");
+  console.log("✅ Database جاهز");
 }
 
 /* =========================================================
-   LOG SETTINGS
+   DEFAULT LOG SETTINGS
 ========================================================= */
 
-async function getLogSettings(guildId) {
+function defaultLogSettings() {
+  const settings = {};
 
+  for (const key of LOG_TYPE_KEYS) {
+    settings[key] = true;
+  }
+
+  return settings;
+}
+
+async function getLogConfig(guildId) {
   const result = await db.query(
     `
-    SELECT enabled, types
+    SELECT enabled, settings
     FROM log_settings
     WHERE guild_id = $1
     `,
@@ -278,82 +286,66 @@ async function getLogSettings(guildId) {
   );
 
   if (!result.rows.length) {
-
-    const types =
-      defaultLogTypes();
+    const settings = defaultLogSettings();
 
     await db.query(
       `
       INSERT INTO log_settings
-      (guild_id, enabled, types)
-      VALUES ($1, TRUE, $2)
-      ON CONFLICT (guild_id)
-      DO NOTHING
+      (guild_id, enabled, settings)
+      VALUES ($1, TRUE, $2::jsonb)
+      ON CONFLICT (guild_id) DO NOTHING
       `,
-      [
-        guildId,
-        JSON.stringify(types)
-      ]
+      [guildId, JSON.stringify(settings)]
     );
 
     return {
       enabled: true,
-      types
+      settings
     };
   }
 
+  const row = result.rows[0];
+
   return {
-    enabled:
-      result.rows[0].enabled,
-    types:
-      result.rows[0].types || defaultLogTypes()
+    enabled: row.enabled,
+    settings: {
+      ...defaultLogSettings(),
+      ...(row.settings || {})
+    }
   };
 }
 
-/* =========================================================
-   CHECK LOG TYPE
-========================================================= */
-
 async function isLogEnabled(guildId, type) {
+  const config = await getLogConfig(guildId);
 
-  const settings =
-    await getLogSettings(guildId);
-
-  if (!settings.enabled) {
-    return false;
-  }
-
-  return settings.types[type] !== false;
+  return config.enabled && config.settings[type] !== false;
 }
 
 /* =========================================================
-   GET LOG CHANNEL
+   LOG CHANNEL
 ========================================================= */
 
 async function getLogChannel(guild) {
+  try {
+    const result = await db.query(
+      `
+      SELECT channel_id
+      FROM log_channels
+      WHERE guild_id = $1
+      `,
+      [guild.id]
+    );
 
-  if (!guild) {
+    if (!result.rows.length) return null;
+
+    const channel = await guild.channels
+      .fetch(result.rows[0].channel_id)
+      .catch(() => null);
+
+    return channel || null;
+  } catch {
     return null;
   }
-
-  const result = await db.query(
-    `
-    SELECT channel_id
-    FROM log_channels
-    WHERE guild_id = $1
-    `,
-    [guild.id]
-  );
-
-  if (!result.rows.length) {
-    return null;
-  }
-
-  return (
-    guild.channels.cache.get(
-      result.rows[0].channel_id
-    ) || null
-  );
 }
 
 /* =========================================================
@@ -365,167 +357,117 @@ async function sendLog(
   type,
   title,
   description,
-  color = 0xF1C40F
+  color = 0x5865f2,
+  force = false
 ) {
-
-  if (!guild) {
-    return;
-  }
-
   try {
+    if (!force) {
+      const enabled = await isLogEnabled(guild.id, type);
 
-    const enabled =
-      await isLogEnabled(
-        guild.id,
-        type
-      );
+      if (!enabled) return;
+    }
 
-    if (!enabled) {
+    const channel = await getLogChannel(guild);
+
+    if (!channel) return;
+
+    const me = guild.members.me;
+
+    if (
+      me &&
+      !channel
+        .permissionsFor(me)
+        ?.has([
+          PermissionFlagsBits.ViewChannel,
+          PermissionFlagsBits.SendMessages,
+          PermissionFlagsBits.EmbedLinks
+        ])
+    ) {
       return;
     }
 
-    const channel =
-      await getLogChannel(guild);
-
-    if (!channel) {
-      return;
-    }
-
-    const embed =
-      new EmbedBuilder()
-        .setColor(color)
-        .setTitle(title)
-        .setDescription(
-          description || "لا توجد تفاصيل"
-        )
-        .setFooter({
-          text: ".v5d. • Logs"
-        })
-        .setTimestamp();
+    const embed = new EmbedBuilder()
+      .setColor(color)
+      .setTitle(title)
+      .setDescription(description || "لا توجد تفاصيل")
+      .setTimestamp()
+      .setFooter({
+        text: guild.name
+      });
 
     await channel.send({
       embeds: [embed]
     });
-
   } catch (error) {
-
-    console.error(
-      "❌ خطأ إرسال اللوق:",
-      error.message
-    );
+    console.error("LOG ERROR:", error.message);
   }
 }
 
 /* =========================================================
-   AUDIT LOG
+   AUDIT LOG HELPER
 ========================================================= */
 
 async function getAuditExecutor(
   guild,
   action,
-  targetId
+  targetId = null
 ) {
-
   try {
+    const logs = await guild.fetchAuditLogs({
+      type: action,
+      limit: 10
+    });
 
-    const logs =
-      await guild.fetchAuditLogs({
-        type: action,
-        limit: 10
-      });
+    const entry = logs.entries.find((x) => {
+      if (targetId && x.target?.id !== targetId) {
+        return false;
+      }
 
-    const entry =
-      logs.entries.find(
-        e =>
-          e.target?.id === targetId &&
-          Date.now() - e.createdTimestamp < 10000
-      );
+      return Date.now() - x.createdTimestamp < 15000;
+    });
 
-    return entry?.executor || null;
+    if (!entry) return null;
 
+    return {
+      user: entry.executor,
+      reason: entry.reason
+    };
   } catch {
     return null;
   }
 }
 
 /* =========================================================
-   UPTIME
+   PERMISSION HELPER
 ========================================================= */
 
-function formatUptime(ms) {
-
-  if (!ms || ms < 0) {
-    return "غير متوفر";
-  }
-
-  let seconds =
-    Math.floor(ms / 1000);
-
-  const days =
-    Math.floor(seconds / 86400);
-
-  seconds %= 86400;
-
-  const hours =
-    Math.floor(seconds / 3600);
-
-  seconds %= 3600;
-
-  const minutes =
-    Math.floor(seconds / 60);
-
-  seconds %= 60;
-
-  return `${days} يوم، ${hours} ساعة، ${minutes} دقيقة، ${seconds} ثانية`;
+function isOwner(interaction) {
+  return interaction.user.id === OWNER_ID;
 }
 
-/* =========================================================
-   LOG COMMAND
-========================================================= */
+function hasPermission(interaction, permission) {
+  if (isOwner(interaction)) return true;
 
-const logCommand =
-  new SlashCommandBuilder()
-    .setName("log")
-    .setDescription("إدارة نظام اللوق")
+  return interaction.memberPermissions?.has(permission);
+}
 
-    .addSubcommand(sub =>
-      sub
-        .setName("setup")
-        .setDescription("تحديد روم اللوق")
-        .addChannelOption(o =>
-          o
-            .setName("channel")
-            .setDescription("روم اللوق")
-            .addChannelTypes(
-              ChannelType.GuildText
-            )
-            .setRequired(true)
-        )
-    )
+async function requirePermission(
+  interaction,
+  permission
+) {
+  if (isOwner(interaction)) return true;
 
-    .addSubcommand(sub =>
-      sub
-        .setName("enable")
-        .setDescription("تشغيل اللوق")
-    )
+  if (!interaction.memberPermissions?.has(permission)) {
+    await interaction.reply({
+      content: "❌ ما عندك صلاحية لاستخدام هذا الأمر.",
+      ephemeral: true
+    });
 
-    .addSubcommand(sub =>
-      sub
-        .setName("disable")
-        .setDescription("إيقاف اللوق")
-    )
+    return false;
+  }
 
-    .addSubcommand(sub =>
-      sub
-        .setName("status")
-        .setDescription("عرض حالة اللوق")
-    )
-
-    .addSubcommand(sub =>
-      sub
-        .setName("edit")
-        .setDescription("تعديل أنواع اللوق")
-    );
+  return true;
+}
 
 /* =========================================================
    COMMANDS
@@ -533,8 +475,7 @@ const logCommand =
 
 const commands = [
 
-  /* ================= ADMIN ================= */
-
+  /* BAN */
   new SlashCommandBuilder()
     .setName("ban")
     .setDescription("حظر عضو")
@@ -547,13 +488,14 @@ const commands = [
     .addStringOption(o =>
       o
         .setName("reason")
-        .setDescription("السبب")
-        .setRequired(true)
+        .setDescription("سبب الحظر")
+        .setRequired(false)
     ),
 
+  /* UNBAN */
   new SlashCommandBuilder()
     .setName("unban")
-    .setDescription("فك حظر عضو")
+    .setDescription("إزالة حظر عضو")
     .addStringOption(o =>
       o
         .setName("userid")
@@ -561,6 +503,7 @@ const commands = [
         .setRequired(true)
     ),
 
+  /* KICK */
   new SlashCommandBuilder()
     .setName("kick")
     .setDescription("طرد عضو")
@@ -573,13 +516,14 @@ const commands = [
     .addStringOption(o =>
       o
         .setName("reason")
-        .setDescription("السبب")
-        .setRequired(true)
+        .setDescription("سبب الطرد")
+        .setRequired(false)
     ),
 
+  /* TIMEOUT */
   new SlashCommandBuilder()
     .setName("timeout")
-    .setDescription("إعطاء Timeout")
+    .setDescription("إعطاء تايم أوت")
     .addUserOption(o =>
       o
         .setName("member")
@@ -589,7 +533,7 @@ const commands = [
     .addIntegerOption(o =>
       o
         .setName("minutes")
-        .setDescription("الدقائق")
+        .setDescription("المدة بالدقائق")
         .setRequired(true)
         .setMinValue(1)
         .setMaxValue(40320)
@@ -598,12 +542,13 @@ const commands = [
       o
         .setName("reason")
         .setDescription("السبب")
-        .setRequired(true)
+        .setRequired(false)
     ),
 
+  /* UNTIMEOUT */
   new SlashCommandBuilder()
     .setName("untimeout")
-    .setDescription("إزالة Timeout")
+    .setDescription("إزالة التايم أوت")
     .addUserOption(o =>
       o
         .setName("member")
@@ -611,6 +556,7 @@ const commands = [
         .setRequired(true)
     ),
 
+  /* WARN */
   new SlashCommandBuilder()
     .setName("warn")
     .setDescription("تحذير عضو")
@@ -627,9 +573,10 @@ const commands = [
         .setRequired(true)
     ),
 
+  /* WARNLIST */
   new SlashCommandBuilder()
     .setName("warnlist")
-    .setDescription("عرض التحذيرات")
+    .setDescription("عرض تحذيرات عضو")
     .addUserOption(o =>
       o
         .setName("member")
@@ -637,29 +584,33 @@ const commands = [
         .setRequired(false)
     ),
 
+  /* CLEAR */
   new SlashCommandBuilder()
     .setName("clear")
-    .setDescription("حذف رسائل")
+    .setDescription("حذف مجموعة رسائل")
     .addIntegerOption(o =>
       o
         .setName("amount")
-        .setDescription("العدد")
+        .setDescription("عدد الرسائل")
         .setRequired(true)
         .setMinValue(1)
         .setMaxValue(100)
     ),
 
+  /* LOCK */
   new SlashCommandBuilder()
     .setName("lock")
     .setDescription("قفل الروم"),
 
+  /* UNLOCK */
   new SlashCommandBuilder()
     .setName("unlock")
     .setDescription("فتح الروم"),
 
+  /* SLOWMODE */
   new SlashCommandBuilder()
     .setName("slowmode")
-    .setDescription("تفعيل Slowmode")
+    .setDescription("تعديل السلو مود")
     .addIntegerOption(o =>
       o
         .setName("seconds")
@@ -669,38 +620,46 @@ const commands = [
         .setMaxValue(21600)
     ),
 
+  /* ROLE */
   new SlashCommandBuilder()
     .setName("role")
     .setDescription("إضافة أو إزالة رتبة")
-    .addUserOption(o =>
-      o
-        .setName("member")
-        .setDescription("العضو")
-        .setRequired(true)
+    .addSubcommand(s =>
+      s
+        .setName("add")
+        .setDescription("إضافة رتبة")
+        .addUserOption(o =>
+          o
+            .setName("member")
+            .setDescription("العضو")
+            .setRequired(true)
+        )
+        .addRoleOption(o =>
+          o
+            .setName("role")
+            .setDescription("الرتبة")
+            .setRequired(true)
+        )
     )
-    .addRoleOption(o =>
-      o
-        .setName("role")
-        .setDescription("الرتبة")
-        .setRequired(true)
-    )
-    .addStringOption(o =>
-      o
-        .setName("action")
-        .setDescription("الإجراء")
-        .setRequired(true)
-        .addChoices(
-          {
-            name: "إضافة",
-            value: "add"
-          },
-          {
-            name: "إزالة",
-            value: "remove"
-          }
+    .addSubcommand(s =>
+      s
+        .setName("remove")
+        .setDescription("إزالة رتبة")
+        .addUserOption(o =>
+          o
+            .setName("member")
+            .setDescription("العضو")
+            .setRequired(true)
+        )
+        .addRoleOption(o =>
+          o
+            .setName("role")
+            .setDescription("الرتبة")
+            .setRequired(true)
         )
     ),
 
+  /* NICKNAME */
   new SlashCommandBuilder()
     .setName("nickname")
     .setDescription("تغيير اسم عضو")
@@ -717,8 +676,7 @@ const commands = [
         .setRequired(true)
     ),
 
-  /* ================= INFO ================= */
-
+  /* INFO */
   new SlashCommandBuilder()
     .setName("info")
     .setDescription("معلومات عضو")
@@ -729,13 +687,15 @@ const commands = [
         .setRequired(false)
     ),
 
+  /* SERVERINFO */
   new SlashCommandBuilder()
     .setName("serverinfo")
     .setDescription("معلومات السيرفر"),
 
+  /* AVATAR */
   new SlashCommandBuilder()
     .setName("avatar")
-    .setDescription("صورة العضو")
+    .setDescription("عرض افتار عضو")
     .addUserOption(o =>
       o
         .setName("member")
@@ -743,9 +703,10 @@ const commands = [
         .setRequired(false)
     ),
 
+  /* BANNER */
   new SlashCommandBuilder()
     .setName("banner")
-    .setDescription("بنر العضو")
+    .setDescription("عرض بنر عضو")
     .addUserOption(o =>
       o
         .setName("member")
@@ -753,22 +714,15 @@ const commands = [
         .setRequired(false)
     ),
 
+  /* ROLES */
   new SlashCommandBuilder()
     .setName("roles")
-    .setDescription("رتب العضو")
-    .addUserOption(o =>
-      o
-        .setName("member")
-        .setDescription("العضو")
-        .setRequired(false)
-    ),
+    .setDescription("عرض رتب السيرفر"),
 
-  /* ================= AUTOREPLY ================= */
-
+  /* AUTOREPLY */
   new SlashCommandBuilder()
     .setName("autoreply")
     .setDescription("إدارة الردود التلقائية")
-
     .addSubcommand(s =>
       s
         .setName("add")
@@ -786,7 +740,6 @@ const commands = [
             .setRequired(true)
         )
     )
-
     .addSubcommand(s =>
       s
         .setName("remove")
@@ -797,28 +750,25 @@ const commands = [
             .setDescription("الكلمة")
             .setRequired(true)
         )
-    )
-
-    .addSubcommand(s =>
-      s
-        .setName("list")
-        .setDescription("عرض الردود")
     ),
 
-  /* ================= SHORTCUT ================= */
+  /* LIST */
+  new SlashCommandBuilder()
+    .setName("list")
+    .setDescription("عرض الردود التلقائية"),
 
+  /* SHORTCUT */
   new SlashCommandBuilder()
     .setName("shortcut")
     .setDescription("إدارة الاختصارات")
-
     .addSubcommand(s =>
       s
         .setName("set")
-        .setDescription("إنشاء اختصار")
+        .setDescription("إضافة اختصار")
         .addStringOption(o =>
           o
-            .setName("shortcut")
-            .setDescription("الاختصار")
+            .setName("name")
+            .setDescription("اسم الاختصار")
             .setRequired(true)
         )
         .addStringOption(o =>
@@ -828,640 +778,2076 @@ const commands = [
             .setRequired(true)
         )
     )
-
     .addSubcommand(s =>
       s
         .setName("remove")
         .setDescription("حذف اختصار")
         .addStringOption(o =>
           o
-            .setName("shortcut")
-            .setDescription("الاختصار")
+            .setName("name")
+            .setDescription("اسم الاختصار")
             .setRequired(true)
         )
     )
-
     .addSubcommand(s =>
       s
         .setName("list")
         .setDescription("عرض الاختصارات")
     ),
 
-  /* ================= OLD LOG ================= */
-
+  /* LOG */
   new SlashCommandBuilder()
-    .setName("logsetup")
-    .setDescription("تحديد روم اللوق")
-    .addChannelOption(o =>
-      o
-        .setName("channel")
-        .setDescription("روم اللوق")
-        .addChannelTypes(
-          ChannelType.GuildText
+    .setName("log")
+    .setDescription("إدارة نظام اللوق")
+    .addSubcommand(s =>
+      s
+        .setName("setup")
+        .setDescription("تحديد روم اللوق")
+        .addChannelOption(o =>
+          o
+            .setName("channel")
+            .setDescription("روم اللوق")
+            .addChannelTypes(ChannelType.GuildText)
+            .setRequired(true)
         )
-        .setRequired(true)
+    )
+    .addSubcommand(s =>
+      s
+        .setName("status")
+        .setDescription("عرض حالة اللوق")
+    )
+    .addSubcommand(s =>
+      s
+        .setName("enable")
+        .setDescription("تشغيل اللوق")
+    )
+    .addSubcommand(s =>
+      s
+        .setName("disable")
+        .setDescription("إيقاف اللوق")
+    )
+    .addSubcommand(s =>
+      s
+        .setName("edit")
+        .setDescription("تحديد أنواع اللوق")
     ),
 
+  /* LOGS TEST */
   new SlashCommandBuilder()
     .setName("logs")
-    .setDescription("اختبار اللوق"),
+    .setDescription("اختبار روم اللوق"),
 
-  /* ================= BOT ================= */
-
+  /* BOT */
   new SlashCommandBuilder()
     .setName("bot")
-    .setDescription("حالة البوت"),
-
-  new SlashCommandBuilder()
-    .setName("me")
     .setDescription("معلومات البوت"),
 
-  logCommand
-
+  /* ME */
+  new SlashCommandBuilder()
+    .setName("me")
+    .setDescription("من أنا")
 ].map(c => c.toJSON());
+
+/* =========================================================
+   REGISTER COMMANDS
+========================================================= */
+
+async function registerCommands(guildId) {
+  try {
+    const rest = new REST({
+      version: "10"
+    }).setToken(TOKEN);
+
+    await rest.put(
+      Routes.applicationGuildCommands(
+        CLIENT_ID,
+        guildId
+      ),
+      {
+        body: commands
+      }
+    );
+
+    console.log(`✅ تم تسجيل الأوامر في ${guildId}`);
+  } catch (error) {
+    console.error(
+      "COMMAND REGISTER ERROR:",
+      error.message
+    );
+  }
+}
 
 /* =========================================================
    READY
 ========================================================= */
 
 client.once("ready", async () => {
-
-  botStartedAt = Date.now();
-  lastReadyAt = new Date();
-
-  console.log("====================================");
-  console.log(`🤖 ${client.user.tag}`);
-  console.log("🟢 البوت Online");
-  console.log(`👑 Owner: ${OWNER_ID}`);
   console.log(
-    `🏠 السيرفرات: ${client.guilds.cache.size}`
+    `✅ Logged in as ${client.user.tag}`
   );
-  console.log(
-    `📋 الأوامر: ${commands.length}`
-  );
-  console.log("====================================");
 
   try {
-
     await setupDatabase();
-
-    await db.query(`
-      UPDATE bot_sessions
-      SET disconnected_at = NOW()
-      WHERE disconnected_at IS NULL
-    `);
 
     await db.query(
       `
-      INSERT INTO bot_sessions
-      (started_at)
-      VALUES ($1)
-      `,
-      [lastReadyAt]
+      INSERT INTO bot_sessions (started_at)
+      VALUES (CURRENT_TIMESTAMP)
+      `
     );
+  } catch (error) {
+    console.error("Database startup error:", error);
+  }
 
-    const rest =
-      new REST({
-        version: "10"
-      }).setToken(TOKEN);
+  for (const guild of client.guilds.cache.values()) {
+    await registerCommands(guild.id);
+  }
 
-    await rest.put(
-      Routes.applicationCommands(
-        CLIENT_ID
-      ),
+  client.user.setPresence({
+    activities: [
       {
-        body: []
+        name: `${client.guilds.cache.size} سيرفر`,
+        type: 3
       }
+    ],
+    status: "online"
+  });
+});
+
+/* =========================================================
+   NEW GUILD
+========================================================= */
+
+client.on("guildCreate", async guild => {
+  await registerCommands(guild.id);
+});
+
+/* =========================================================
+   MESSAGE DELETE
+========================================================= */
+
+client.on("messageDelete", async message => {
+  if (!message.guild) return;
+
+  const content =
+    message.content?.trim() ||
+    "محتوى الرسالة غير متوفر";
+
+  const author =
+    message.author
+      ? `<@${message.author.id}>`
+      : "غير معروف";
+
+  await sendLog(
+    message.guild,
+    "message_delete",
+    "🗑️ رسالة محذوفة",
+    [
+      `👤 المرسل: ${author}`,
+      `📍 الروم: <#${message.channelId}>`,
+      `💬 المحتوى: ${content.slice(0, 1000)}`
+    ].join("\n"),
+    0xed4245
+  );
+});
+
+/* =========================================================
+   BULK MESSAGE DELETE
+========================================================= */
+
+client.on("messageDeleteBulk", async messages => {
+  if (!messages.size) return;
+
+  const guild = messages.first()?.guild;
+
+  if (!guild) return;
+
+  await sendLog(
+    guild,
+    "message_bulk_delete",
+    "🗑️ حذف مجموعة رسائل",
+    `تم حذف **${messages.size}** رسالة.`,
+    0xed4245
+  );
+});
+
+/* =========================================================
+   MESSAGE UPDATE
+========================================================= */
+
+client.on("messageUpdate", async (oldMessage, newMessage) => {
+  if (!newMessage.guild) return;
+
+  if (
+    oldMessage.content === newMessage.content
+  ) {
+    return;
+  }
+
+  await sendLog(
+    newMessage.guild,
+    "message_delete",
+    "✏️ تعديل رسالة",
+    [
+      `👤 العضو: ${
+        newMessage.author
+          ? `<@${newMessage.author.id}>`
+          : "غير معروف"
+      }`,
+      `📍 الروم: <#${newMessage.channelId}>`,
+      `قبل: ${
+        oldMessage.content?.slice(0, 500) ||
+        "غير متوفر"
+      }`,
+      `بعد: ${
+        newMessage.content?.slice(0, 500) ||
+        "غير متوفر"
+      }`
+    ].join("\n"),
+    0xfee75c
+  );
+});
+
+/* =========================================================
+   MEMBER JOIN
+========================================================= */
+
+client.on("guildMemberAdd", async member => {
+  await sendLog(
+    member.guild,
+    "member_join",
+    "📥 إنضمام عضو",
+    [
+      `👤 العضو: <@${member.id}>`,
+      `🆔 ID: \`${member.id}\``,
+      `📅 إنشاء الحساب: <t:${Math.floor(
+        member.user.createdTimestamp / 1000
+      )}:F>`
+    ].join("\n"),
+    0x57f287
+  );
+});
+
+/* =========================================================
+   MEMBER LEAVE / KICK
+========================================================= */
+
+client.on("guildMemberRemove", async member => {
+  const audit = await getAuditExecutor(
+    member.guild,
+    AuditLogEvent.MemberKick,
+    member.id
+  );
+
+  if (audit) {
+    await sendLog(
+      member.guild,
+      "member_kick",
+      "👢 طرد عضو",
+      [
+        `👤 العضو: <@${member.id}>`,
+        `🆔 ID: \`${member.id}\``,
+        `👮 المنفذ: ${
+          audit.user
+            ? `<@${audit.user.id}>`
+            : "غير معروف"
+        }`,
+        `📝 السبب: ${
+          audit.reason || "بدون سبب"
+        }`
+      ].join("\n"),
+      0xed4245
     );
 
-    for (
-      const guild
-      of client.guilds.cache.values()
-    ) {
+    return;
+  }
 
-      try {
+  await sendLog(
+    member.guild,
+    "member_leave",
+    "📤 خروج عضو",
+    [
+      `👤 العضو: <@${member.id}>`,
+      `🆔 ID: \`${member.id}\``
+    ].join("\n"),
+    0xed4245
+  );
+});
 
-        await rest.put(
-          Routes.applicationGuildCommands(
-            CLIENT_ID,
-            guild.id
-          ),
-          {
-            body: commands
-          }
-        );
+/* =========================================================
+   MEMBER UPDATE
+========================================================= */
 
-        console.log(
-          `✅ ${guild.name}: ${commands.length} أمر`
-        );
+client.on("guildMemberUpdate", async (oldMember, newMember) => {
 
-      } catch (error) {
+  /* TIMEOUT */
+  const oldTimeout =
+    oldMember.communicationDisabledUntilTimestamp;
 
-        console.error(
-          `❌ ${guild.name}:`,
-          error.message
-        );
-      }
+  const newTimeout =
+    newMember.communicationDisabledUntilTimestamp;
+
+  if (!oldTimeout && newTimeout) {
+    await sendLog(
+      newMember.guild,
+      "timeout",
+      "⏱️ إضافة تايم أوت",
+      [
+        `👤 العضو: <@${newMember.id}>`,
+        `⏰ ينتهي: <t:${Math.floor(
+          newTimeout / 1000
+        )}:F>`
+      ].join("\n"),
+      0xfee75c
+    );
+  }
+
+  if (oldTimeout && !newTimeout) {
+    await sendLog(
+      newMember.guild,
+      "timeout",
+      "♻️ إزالة تايم أوت",
+      `👤 العضو: <@${newMember.id}>`,
+      0x57f287
+    );
+  }
+
+  /* NICKNAME */
+  if (oldMember.nickname !== newMember.nickname) {
+    await sendLog(
+      newMember.guild,
+      "member_update",
+      "✏️ تغيير اسم عضو",
+      [
+        `👤 العضو: <@${newMember.id}>`,
+        `قبل: ${oldMember.nickname || "بدون اسم"}`,
+        `بعد: ${newMember.nickname || "بدون اسم"}`
+      ].join("\n"),
+      0x5865f2
+    );
+  }
+
+  /* ROLES */
+  const oldRoles = new Set(
+    oldMember.roles.cache.keys()
+  );
+
+  const newRoles = new Set(
+    newMember.roles.cache.keys()
+  );
+
+  const addedRoles = [...newRoles].filter(
+    id => !oldRoles.has(id)
+  );
+
+  const removedRoles = [...oldRoles].filter(
+    id => !newRoles.has(id)
+  );
+
+  if (addedRoles.length || removedRoles.length) {
+    let text = `👤 العضو: <@${newMember.id}>\n`;
+
+    if (addedRoles.length) {
+      text +=
+        `➕ تمت إضافة: ` +
+        addedRoles
+          .map(id => `<@&${id}>`)
+          .join(", ") +
+        "\n";
     }
 
-    console.log(
-      "🚀 البوت جاهز بالكامل"
-    );
+    if (removedRoles.length) {
+      text +=
+        `➖ تمت إزالة: ` +
+        removedRoles
+          .map(id => `<@&${id}>`)
+          .join(", ");
+    }
 
-  } catch (error) {
-
-    console.error(
-      "❌ READY ERROR:",
-      error
+    await sendLog(
+      newMember.guild,
+      "member_roles",
+      "👤 تحديث رُتب عضو",
+      text,
+      0x5865f2
     );
   }
 });
 
 /* =========================================================
-   GUILD CREATE
+   BAN
 ========================================================= */
 
-client.on(
-  "guildCreate",
-  async guild => {
+client.on("guildBanAdd", async ban => {
+  const audit = await getAuditExecutor(
+    ban.guild,
+    AuditLogEvent.MemberBanAdd,
+    ban.user.id
+  );
 
-    try {
+  await sendLog(
+    ban.guild,
+    "ban",
+    "🔨 حظر عضو",
+    [
+      `👤 العضو: <@${ban.user.id}>`,
+      `🆔 ID: \`${ban.user.id}\``,
+      `👮 المنفذ: ${
+        audit?.user
+          ? `<@${audit.user.id}>`
+          : "غير معروف"
+      }`,
+      `📝 السبب: ${
+        audit?.reason || "بدون سبب"
+      }`
+    ].join("\n"),
+    0xed4245
+  );
+});
 
-      const rest =
-        new REST({
-          version: "10"
-        }).setToken(TOKEN);
+/* =========================================================
+   UNBAN
+========================================================= */
 
-      await rest.put(
-        Routes.applicationGuildCommands(
-          CLIENT_ID,
-          guild.id
-        ),
-        {
-          body: commands
+client.on("guildBanRemove", async ban => {
+  const audit = await getAuditExecutor(
+    ban.guild,
+    AuditLogEvent.MemberBanRemove,
+    ban.user.id
+  );
+
+  await sendLog(
+    ban.guild,
+    "unban",
+    "♻️ إزالة حظر عضو",
+    [
+      `👤 العضو: <@${ban.user.id}>`,
+      `🆔 ID: \`${ban.user.id}\``,
+      `👮 المنفذ: ${
+        audit?.user
+          ? `<@${audit.user.id}>`
+          : "غير معروف"
+      }`
+    ].join("\n"),
+    0x57f287
+  );
+});
+
+/* =========================================================
+   VOICE STATE
+========================================================= */
+
+client.on("voiceStateUpdate", async (oldState, newState) => {
+  const member =
+    newState.member ||
+    oldState.member;
+
+  if (!member) return;
+
+  /* SERVER MUTE */
+  if (oldState.serverMute !== newState.serverMute) {
+    await sendLog(
+      member.guild,
+      "mute",
+      newState.serverMute
+        ? "🔇 تم عمل ميوت صوتي"
+        : "🔊 تم إزالة الميوت الصوتي",
+      [
+        `👤 العضو: <@${member.id}>`,
+        `🎙️ الروم: ${
+          newState.channel
+            ? `<#${newState.channel.id}>`
+            : oldState.channel
+              ? `<#${oldState.channel.id}>`
+              : "غير معروف"
+        }`
+      ].join("\n"),
+      newState.serverMute
+        ? 0xed4245
+        : 0x57f287
+    );
+  }
+
+  /* SERVER DEAF */
+  if (oldState.serverDeaf !== newState.serverDeaf) {
+    await sendLog(
+      member.guild,
+      "voice_permissions",
+      newState.serverDeaf
+        ? "🔇 منع الإستماع"
+        : "🔊 السماح بالإستماع",
+      `👤 العضو: <@${member.id}>`,
+      newState.serverDeaf
+        ? 0xed4245
+        : 0x57f287
+    );
+  }
+
+  /* JOIN */
+  if (!oldState.channel && newState.channel) {
+    await sendLog(
+      member.guild,
+      "voice",
+      "🎙️ دخول صوتي",
+      [
+        `👤 العضو: <@${member.id}>`,
+        `📍 الروم: <#${newState.channel.id}>`
+      ].join("\n"),
+      0x57f287
+    );
+
+    return;
+  }
+
+  /* LEAVE */
+  if (oldState.channel && !newState.channel) {
+    await sendLog(
+      member.guild,
+      "voice",
+      "📤 خروج صوتي",
+      [
+        `👤 العضو: <@${member.id}>`,
+        `📍 الروم: <#${oldState.channel.id}>`
+      ].join("\n"),
+      0xed4245
+    );
+
+    return;
+  }
+
+  /* MOVE */
+  if (
+    oldState.channel &&
+    newState.channel &&
+    oldState.channel.id !== newState.channel.id
+  ) {
+    await sendLog(
+      member.guild,
+      "member_move",
+      "↔️ تنقل صوتي",
+      [
+        `👤 العضو: <@${member.id}>`,
+        `من: <#${oldState.channel.id}>`,
+        `إلى: <#${newState.channel.id}>`
+      ].join("\n"),
+      0x5865f2
+    );
+  }
+});
+
+/* =========================================================
+   CHANNEL CREATE
+========================================================= */
+
+client.on("channelCreate", async channel => {
+  if (!channel.guild) return;
+
+  await sendLog(
+    channel.guild,
+    "channel_create_delete",
+    "📁 إنشاء روم",
+    [
+      `📌 الروم: <#${channel.id}>`,
+      `📝 الاسم: \`${channel.name}\``,
+      `🔖 النوع: \`${channel.type}\``
+    ].join("\n"),
+    0x57f287
+  );
+});
+
+/* =========================================================
+   CHANNEL DELETE
+========================================================= */
+
+client.on("channelDelete", async channel => {
+  if (!channel.guild) return;
+
+  await sendLog(
+    channel.guild,
+    "channel_create_delete",
+    "🗑️ حذف روم",
+    [
+      `📝 الاسم: \`${channel.name}\``,
+      `🆔 ID: \`${channel.id}\``
+    ].join("\n"),
+    0xed4245
+  );
+});
+
+/* =========================================================
+   CHANNEL UPDATE
+========================================================= */
+
+client.on("channelUpdate", async (oldChannel, newChannel) => {
+  if (!newChannel.guild) return;
+
+  let changed = [];
+
+  if (oldChannel.name !== newChannel.name) {
+    changed.push(
+      `📝 الاسم: \`${oldChannel.name}\` → \`${newChannel.name}\``
+    );
+  }
+
+  if (
+    oldChannel.topic !== newChannel.topic
+  ) {
+    changed.push("📄 تم تحديث وصف الروم");
+  }
+
+  if (
+    oldChannel.parentId !== newChannel.parentId
+  ) {
+    changed.push("📂 تم تغيير تصنيف الروم");
+  }
+
+  if (
+    oldChannel.rateLimitPerUser !==
+    newChannel.rateLimitPerUser
+  ) {
+    changed.push(
+      `🐌 السلو مود: \`${oldChannel.rateLimitPerUser || 0}\` → \`${newChannel.rateLimitPerUser || 0}\``
+    );
+  }
+
+  if (
+    oldChannel.nsfw !== newChannel.nsfw
+  ) {
+    changed.push("🔞 تم تغيير إعداد NSFW");
+  }
+
+  const oldOverwrites =
+    oldChannel.permissionOverwrites?.cache;
+
+  const newOverwrites =
+    newChannel.permissionOverwrites?.cache;
+
+  if (
+    oldOverwrites &&
+    newOverwrites
+  ) {
+    const oldMap = new Map(
+      oldOverwrites.map(x => [
+        x.id,
+        `${x.allow.bitfield}-${x.deny.bitfield}`
+      ])
+    );
+
+    const newMap = new Map(
+      newOverwrites.map(x => [
+        x.id,
+        `${x.allow.bitfield}-${x.deny.bitfield}`
+      ])
+    );
+
+    let permissionsChanged = false;
+
+    for (const [id, value] of newMap) {
+      if (oldMap.get(id) !== value) {
+        permissionsChanged = true;
+        break;
+      }
+    }
+
+    if (!permissionsChanged) {
+      for (const id of oldMap.keys()) {
+        if (!newMap.has(id)) {
+          permissionsChanged = true;
+          break;
         }
-      );
+      }
+    }
 
-      console.log(
-        `🆕 تم تسجيل الأوامر في ${guild.name}`
-      );
-
-    } catch (error) {
-
-      console.error(
-        "❌ Guild Create:",
-        error.message
+    if (permissionsChanged) {
+      await sendLog(
+        newChannel.guild,
+        "channel_permissions",
+        "🔐 تحديث صلاحيات روم",
+        `📍 الروم: <#${newChannel.id}>\nتم تعديل صلاحيات التحدث/الإستماع أو الصلاحيات الخاصة بالروم.`,
+        0xfee75c
       );
     }
   }
-);
+
+  if (changed.length) {
+    await sendLog(
+      newChannel.guild,
+      "channel_update",
+      "📝 تحديث روم",
+      [
+        `📍 الروم: <#${newChannel.id}>`,
+        ...changed
+      ].join("\n"),
+      0x5865f2
+    );
+  }
+});
 
 /* =========================================================
-   DISCONNECT
+   ROLE CREATE
 ========================================================= */
 
-client.on(
-  "shardDisconnect",
-  async () => {
+client.on("roleCreate", async role => {
+  await sendLog(
+    role.guild,
+    "role_create_delete",
+    "➕ إنشاء رتبة",
+    [
+      `🎭 الرتبة: <@&${role.id}>`,
+      `📝 الاسم: \`${role.name}\``,
+      `🆔 ID: \`${role.id}\``
+    ].join("\n"),
+    0x57f287
+  );
+});
 
-    lastDisconnectAt =
-      new Date();
+/* =========================================================
+   ROLE DELETE
+========================================================= */
 
-    try {
+client.on("roleDelete", async role => {
+  await sendLog(
+    role.guild,
+    "role_create_delete",
+    "🗑️ حذف رتبة",
+    [
+      `📝 الاسم: \`${role.name}\``,
+      `🆔 ID: \`${role.id}\``
+    ].join("\n"),
+    0xed4245
+  );
+});
 
-      await db.query(`
-        UPDATE bot_sessions
-        SET disconnected_at = NOW()
-        WHERE disconnected_at IS NULL
-      `);
+/* =========================================================
+   ROLE UPDATE
+========================================================= */
 
-    } catch {}
+client.on("roleUpdate", async (oldRole, newRole) => {
+
+  const permissionChanged =
+    oldRole.permissions.bitfield !==
+    newRole.permissions.bitfield;
+
+  if (permissionChanged) {
+    await sendLog(
+      newRole.guild,
+      "role_permissions",
+      "🛡️ تحديث صلاحيات رتبة",
+      [
+        `🎭 الرتبة: <@&${newRole.id}>`,
+        `📝 الاسم: \`${newRole.name}\``
+      ].join("\n"),
+      0xfee75c
+    );
   }
-);
+
+  const changes = [];
+
+  if (oldRole.name !== newRole.name) {
+    changes.push(
+      `الاسم: \`${oldRole.name}\` → \`${newRole.name}\``
+    );
+  }
+
+  if (oldRole.color !== newRole.color) {
+    changes.push("تم تغيير لون الرتبة");
+  }
+
+  if (oldRole.hoist !== newRole.hoist) {
+    changes.push("تم تغيير ظهور الرتبة منفصلة");
+  }
+
+  if (
+    oldRole.mentionable !==
+    newRole.mentionable
+  ) {
+    changes.push("تم تغيير قابلية منشن الرتبة");
+  }
+
+  if (changes.length) {
+    await sendLog(
+      newRole.guild,
+      "role_update",
+      "✏️ تحديث رتبة",
+      [
+        `🎭 الرتبة: <@&${newRole.id}>`,
+        ...changes
+      ].join("\n"),
+      0x5865f2
+    );
+  }
+});
+
+/* =========================================================
+   EMOJI
+========================================================= */
+
+client.on("emojiCreate", async emoji => {
+  await sendLog(
+    emoji.guild,
+    "emoji",
+    "😀 إضافة إيموجي",
+    [
+      `😀 الاسم: \`${emoji.name}\``,
+      `🆔 ID: \`${emoji.id}\``
+    ].join("\n"),
+    0x57f287
+  );
+});
+
+client.on("emojiDelete", async emoji => {
+  await sendLog(
+    emoji.guild,
+    "emoji",
+    "🗑️ حذف إيموجي",
+    [
+      `😀 الاسم: \`${emoji.name}\``,
+      `🆔 ID: \`${emoji.id}\``
+    ].join("\n"),
+    0xed4245
+  );
+});
+
+client.on("emojiUpdate", async (oldEmoji, newEmoji) => {
+  await sendLog(
+    newEmoji.guild,
+    "emoji",
+    "✏️ تحديث إيموجي",
+    [
+      `قبل: \`${oldEmoji.name}\``,
+      `بعد: \`${newEmoji.name}\``,
+      `🆔 ID: \`${newEmoji.id}\``
+    ].join("\n"),
+    0x5865f2
+  );
+});
+
+/* =========================================================
+   STICKERS
+========================================================= */
+
+client.on("stickerCreate", async sticker => {
+  await sendLog(
+    sticker.guild,
+    "sticker",
+    "🏷️ إضافة ستيكر",
+    [
+      `🏷️ الاسم: \`${sticker.name}\``,
+      `🆔 ID: \`${sticker.id}\``
+    ].join("\n"),
+    0x57f287
+  );
+});
+
+client.on("stickerDelete", async sticker => {
+  await sendLog(
+    sticker.guild,
+    "sticker",
+    "🗑️ حذف ستيكر",
+    [
+      `🏷️ الاسم: \`${sticker.name}\``,
+      `🆔 ID: \`${sticker.id}\``
+    ].join("\n"),
+    0xed4245
+  );
+});
+
+client.on("stickerUpdate", async (oldSticker, newSticker) => {
+  await sendLog(
+    newSticker.guild,
+    "sticker",
+    "✏️ تحديث ستيكر",
+    [
+      `قبل: \`${oldSticker.name}\``,
+      `بعد: \`${newSticker.name}\``,
+      `🆔 ID: \`${newSticker.id}\``
+    ].join("\n"),
+    0x5865f2
+  );
+});
+
+/* =========================================================
+   REACTION ADD
+========================================================= */
+
+client.on("messageReactionAdd", async (reaction, user) => {
+  try {
+    if (user.bot) return;
+
+    if (reaction.partial) {
+      await reaction.fetch();
+    }
+
+    const guild = reaction.message.guild;
+
+    if (!guild) return;
+
+    await sendLog(
+      guild,
+      "reaction",
+      "❤️ إضافة رياكشن",
+      [
+        `👤 العضو: <@${user.id}>`,
+        `📍 الروم: <#${reaction.message.channelId}>`,
+        `😀 الرياكشن: ${reaction.emoji}`,
+        `🔗 الرسالة: [فتح الرسالة](${reaction.message.url})`
+      ].join("\n"),
+      0x5865f2
+    );
+  } catch (error) {
+    console.error(
+      "REACTION ERROR:",
+      error.message
+    );
+  }
+});
+
+/* =========================================================
+   GUILD UPDATE
+========================================================= */
+
+client.on("guildUpdate", async (oldGuild, newGuild) => {
+  const changes = [];
+
+  if (oldGuild.name !== newGuild.name) {
+    changes.push(
+      `📝 الاسم: \`${oldGuild.name}\` → \`${newGuild.name}\``
+    );
+  }
+
+  if (oldGuild.icon !== newGuild.icon) {
+    changes.push("🖼️ تم تغيير صورة السيرفر");
+  }
+
+  if (oldGuild.banner !== newGuild.banner) {
+    changes.push("🎨 تم تغيير بنر السيرفر");
+  }
+
+  if (
+    oldGuild.verificationLevel !==
+    newGuild.verificationLevel
+  ) {
+    changes.push("🛡️ تم تغيير مستوى التحقق");
+  }
+
+  if (
+    oldGuild.afkChannelId !==
+    newGuild.afkChannelId
+  ) {
+    changes.push("💤 تم تغيير روم AFK");
+  }
+
+  if (
+    oldGuild.afkTimeout !==
+    newGuild.afkTimeout
+  ) {
+    changes.push("⏱️ تم تغيير مدة AFK");
+  }
+
+  if (changes.length) {
+    await sendLog(
+      newGuild,
+      "guild_update",
+      "⚙️ تحديث إعدادات السيرفر",
+      changes.join("\n"),
+      0x5865f2
+    );
+  }
+});
 
 /* =========================================================
    INTERACTIONS
 ========================================================= */
 
-client.on(
-  "interactionCreate",
-  async interaction => {
+client.on("interactionCreate", async interaction => {
+
+  /* =======================================================
+     SELECT MENU - LOG EDIT
+  ======================================================= */
+
+  if (
+    interaction.isStringSelectMenu() &&
+    interaction.customId === "log_edit_select"
+  ) {
+    if (
+      !isOwner(interaction) &&
+      !interaction.memberPermissions?.has(
+        PermissionFlagsBits.ManageGuild
+      )
+    ) {
+      return interaction.reply({
+        content: "❌ ما عندك صلاحية إدارة اللوق.",
+        ephemeral: true
+      });
+    }
 
     try {
+      const config = await getLogConfig(
+        interaction.guildId
+      );
 
-      /* =====================================================
-         SELECT MENU
-      ===================================================== */
+      for (const type of interaction.values) {
+        config.settings[type] =
+          !config.settings[type];
+      }
 
-      if (
-        interaction.isStringSelectMenu()
-      ) {
+      await db.query(
+        `
+        UPDATE log_settings
+        SET settings = $2::jsonb
+        WHERE guild_id = $1
+        `,
+        [
+          interaction.guildId,
+          JSON.stringify(config.settings)
+        ]
+      );
 
-        if (
-          interaction.customId !==
-          "log_edit_select"
-        ) {
-          return;
-        }
+      const changed = interaction.values
+        .map(type => {
+          const status =
+            config.settings[type]
+              ? "🟢 مفعّل"
+              : "🔴 معطّل";
 
-        if (!isOwner(interaction)) {
+          return `${LOG_TYPES[type].emoji} ${LOG_TYPES[type].name} — ${status}`;
+        })
+        .join("\n");
 
-          if (
-            !interaction.memberPermissions?.has(
-              PermissionFlagsBits.ManageGuild
-            )
-          ) {
+      await interaction.update({
+        content:
+          `✅ تم تحديث إعدادات اللوق:\n\n${changed}`,
+        components: []
+      });
+    } catch (error) {
+      console.error(error);
 
-            return interaction.reply({
-              content:
-                "❌ ما عندك صلاحية تعديل اللوق.",
-              ephemeral: true
-            });
-          }
-        }
-
-        const selected =
-          interaction.values;
-
-        const settings =
-          await getLogSettings(
-            interaction.guildId
-          );
-
-        for (
-          const type
-          of Object.keys(LOG_TYPES)
-        ) {
-
-          settings.types[type] =
-            selected.includes(type);
-        }
-
-        await db.query(
-          `
-          INSERT INTO log_settings
-          (guild_id, enabled, types)
-          VALUES ($1, $2, $3)
-          ON CONFLICT (guild_id)
-          DO UPDATE SET
-            enabled = EXCLUDED.enabled,
-            types = EXCLUDED.types
-          `,
-          [
-            interaction.guildId,
-            settings.enabled,
-            JSON.stringify(
-              settings.types
-            )
-          ]
-        );
-
-        return interaction.update({
+      if (!interaction.replied) {
+        await interaction.reply({
           content:
-            "✅ تم حفظ إعدادات اللوق.",
-          embeds: [],
-          components: []
+            "❌ حدث خطأ أثناء تحديث إعدادات اللوق.",
+          ephemeral: true
         });
       }
+    }
 
-      /* =====================================================
-         COMMANDS ONLY
-      ===================================================== */
+    return;
+  }
+
+  /* =======================================================
+     SLASH COMMANDS
+  ======================================================= */
+
+  if (!interaction.isChatInputCommand()) {
+    return;
+  }
+
+  try {
+
+    /* =====================================================
+       BAN
+    ===================================================== */
+
+    if (interaction.commandName === "ban") {
+      if (
+        !(await requirePermission(
+          interaction,
+          PermissionFlagsBits.BanMembers
+        ))
+      ) return;
+
+      const user =
+        interaction.options.getUser("member");
+
+      const reason =
+        interaction.options.getString("reason") ||
+        "بدون سبب";
+
+      const member =
+        await interaction.guild.members
+          .fetch(user.id)
+          .catch(() => null);
 
       if (
-        !interaction.isChatInputCommand()
+        member &&
+        !isOwner(interaction) &&
+        !member.bannable
       ) {
-        return;
-      }
-
-      /* =====================================================
-         PERMISSION
-      ===================================================== */
-
-      if (
-        !checkCommandPermission(
-          interaction
-        )
-      ) {
-
         return interaction.reply({
           content:
-            "❌ ما عندك صلاحية استخدام هذا الأمر.",
+            "❌ لا أستطيع حظر هذا العضو.",
           ephemeral: true
         });
       }
 
-      /* =====================================================
-         LOG COMMAND
-      ===================================================== */
+      await interaction.guild.members.ban(
+        user,
+        {
+          reason
+        }
+      );
 
+      await interaction.reply({
+        content:
+          `🔨 تم حظر ${user}.`
+      });
+
+      return;
+    }
+
+    /* =====================================================
+       UNBAN
+    ===================================================== */
+
+    if (interaction.commandName === "unban") {
       if (
-        interaction.commandName ===
-        "log"
-      ) {
+        !(await requirePermission(
+          interaction,
+          PermissionFlagsBits.BanMembers
+        ))
+      ) return;
 
-        const sub =
-          interaction.options.getSubcommand();
+      const id =
+        interaction.options.getString("userid");
 
-        /* ================= SETUP ================= */
+      await interaction.guild.members.unban(id);
 
-        if (sub === "setup") {
+      await interaction.reply({
+        content:
+          `♻️ تم إزالة حظر \`${id}\`.`
+      });
 
-          const channel =
-            interaction.options.getChannel(
-              "channel"
-            );
+      return;
+    }
 
-          await db.query(
-            `
-            INSERT INTO log_channels
-            (guild_id, channel_id)
-            VALUES ($1, $2)
-            ON CONFLICT (guild_id)
-            DO UPDATE SET
-              channel_id = EXCLUDED.channel_id
-            `,
-            [
-              interaction.guildId,
-              channel.id
-            ]
-          );
+    /* =====================================================
+       KICK
+    ===================================================== */
 
-          await getLogSettings(
-            interaction.guildId
-          );
+    if (interaction.commandName === "kick") {
+      if (
+        !(await requirePermission(
+          interaction,
+          PermissionFlagsBits.KickMembers
+        ))
+      ) return;
 
-          await interaction.reply({
-            content:
-              `✅ تم تحديد ${channel} كروم اللوق.`,
-            ephemeral: true
-          });
+      const user =
+        interaction.options.getUser("member");
 
-          await sendLog(
-            interaction.guild,
-            "guild_update",
-            "📋 إعداد اللوق",
-            `**بواسطة:** ${interaction.user}\n**الروم:** ${channel}`,
-            0x2ECC71
-          );
+      const reason =
+        interaction.options.getString("reason") ||
+        "بدون سبب";
 
-          return;
-        }
+      const member =
+        await interaction.guild.members
+          .fetch(user.id)
+          .catch(() => null);
 
-        /* ================= ENABLE ================= */
-
-        if (sub === "enable") {
-
-          const channel =
-            await getLogChannel(
-              interaction.guild
-            );
-
-          if (!channel) {
-
-            return interaction.reply({
-              content:
-                "❌ حدد روم اللوق أولاً باستخدام `/log setup`.",
-              ephemeral: true
-            });
-          }
-
-          const settings =
-            await getLogSettings(
-              interaction.guildId
-            );
-
-          await db.query(
-            `
-            INSERT INTO log_settings
-            (guild_id, enabled, types)
-            VALUES ($1, TRUE, $2)
-            ON CONFLICT (guild_id)
-            DO UPDATE SET
-              enabled = TRUE
-            `,
-            [
-              interaction.guildId,
-              JSON.stringify(
-                settings.types
-              )
-            ]
-          );
-
-          return interaction.reply({
-            content:
-              `🟢 تم تشغيل نظام اللوق.\nروم اللوق: ${channel}`,
-            ephemeral: true
-          });
-        }
-
-        /* ================= DISABLE ================= */
-
-        if (sub === "disable") {
-
-          const settings =
-            await getLogSettings(
-              interaction.guildId
-            );
-
-          await db.query(
-            `
-            INSERT INTO log_settings
-            (guild_id, enabled, types)
-            VALUES ($1, FALSE, $2)
-            ON CONFLICT (guild_id)
-            DO UPDATE SET
-              enabled = FALSE
-            `,
-            [
-              interaction.guildId,
-              JSON.stringify(
-                settings.types
-              )
-            ]
-          );
-
-          return interaction.reply({
-            content:
-              "🔴 تم إيقاف نظام اللوق.",
-            ephemeral: true
-          });
-        }
-
-        /* ================= STATUS ================= */
-
-        if (sub === "status") {
-
-          const settings =
-            await getLogSettings(
-              interaction.guildId
-            );
-
-          const channel =
-            await getLogChannel(
-              interaction.guild
-            );
-
-          const enabledTypes =
-            Object.entries(
-              settings.types
-            )
-              .filter(
-                ([, value]) => value
-              )
-              .map(
-                ([key]) =>
-                  `• ${LOG_TYPES[key]}`
-              )
-              .join("\n");
-
-          const disabledTypes =
-            Object.entries(
-              settings.types
-            )
-              .filter(
-                ([, value]) => !value
-              )
-              .map(
-                ([key]) =>
-                  `• ${LOG_TYPES[key]}`
-              )
-              .join("\n");
-
-          const embed =
-            new EmbedBuilder()
-              .setColor(
-                settings.enabled
-                  ? 0x2ECC71
-                  : 0xE74C3C
-              )
-              .setTitle(
-                "📋 حالة نظام اللوق"
-              )
-              .addFields(
-
-                {
-                  name: "الحالة",
-                  value:
-                    settings.enabled
-                      ? "🟢 مفعّل"
-                      : "🔴 متوقف",
-                  inline: true
-                },
-
-                {
-                  name: "روم اللوق",
-                  value:
-                    channel
-                      ? `${channel}`
-                      : "❌ غير محدد",
-                  inline: true
-                },
-
-                {
-                  name: "الأنواع المفعلة",
-                  value:
-                    enabledTypes ||
-                    "لا يوجد",
-                  inline: false
-                },
-
-                {
-                  name: "الأنواع المتوقفة",
-                  value:
-                    disabledTypes ||
-                    "لا يوجد",
-                  inline: false
-                }
-
-              )
-              .setFooter({
-                text: ".v5d. • Log System"
-              })
-              .setTimestamp();
-
-          return interaction.reply({
-            embeds: [embed],
-            ephemeral: true
-          });
-        }
-
-        /* ================= EDIT ================= */
-
-        if (sub === "edit") {
-
-          const settings =
-            await getLogSettings(
-              interaction.guildId
-            );
-
-          const options =
-            Object.entries(
-              LOG_TYPES
-            ).map(
-              ([key, name]) => {
-
-                const option =
-                  new StringSelectMenuOptionBuilder()
-                    .setLabel(name)
-                    .setValue(key)
-                    .setDescription(
-                      settings.types[key]
-                        ? "🟢 مفعّل"
-                        : "🔴 متوقف"
-                    );
-
-                if (
-                  settings.types[key]
-                ) {
-                  option.setDefault(true);
-                }
-
-                return option;
-              }
-            );
-
-          const menu =
-            new StringSelectMenuBuilder()
-              .setCustomId(
-                "log_edit_select"
-              )
-              .setPlaceholder(
-                "اختر أنواع اللوق التي تريدها"
-              )
-              .setMinValues(0)
-              .setMaxValues(
-                options.length
-              )
-              .addOptions(options);
-
-          const row =
-            new ActionRowBuilder()
-              .addComponents(menu);
-
-          return interaction.reply({
-            content:
-              "📋 **تعديل أنواع اللوق**\n\n" +
-              "حدد الأنواع التي تريد أن يرسلها البوت في روم اللوق، ثم اضغط تأكيد الاختيار.",
-            components: [row],
-            ephemeral: true
-          });
-        }
+      if (!member) {
+        return interaction.reply({
+          content:
+            "❌ العضو غير موجود في السيرفر.",
+          ephemeral: true
+        });
       }
 
-      /* =====================================================
-         OLD LOGSETUP
-      ===================================================== */
-
       if (
-        interaction.commandName ===
-        "logsetup"
+        !isOwner(interaction) &&
+        !member.kickable
       ) {
+        return interaction.reply({
+          content:
+            "❌ لا أستطيع طرد هذا العضو.",
+          ephemeral: true
+        });
+      }
 
-        const channel =
-          interaction.options.getChannel(
-            "channel"
+      await member.kick(reason);
+
+      await interaction.reply({
+        content:
+          `👢 تم طرد ${user}.`
+      });
+
+      return;
+    }
+
+    /* =====================================================
+       TIMEOUT
+    ===================================================== */
+
+    if (interaction.commandName === "timeout") {
+      if (
+        !(await requirePermission(
+          interaction,
+          PermissionFlagsBits.ModerateMembers
+        ))
+      ) return;
+
+      const user =
+        interaction.options.getUser("member");
+
+      const minutes =
+        interaction.options.getInteger("minutes");
+
+      const reason =
+        interaction.options.getString("reason") ||
+        "بدون سبب";
+
+      const member =
+        await interaction.guild.members
+          .fetch(user.id)
+          .catch(() => null);
+
+      if (!member) {
+        return interaction.reply({
+          content: "❌ العضو غير موجود.",
+          ephemeral: true
+        });
+      }
+
+      await member.timeout(
+        minutes * 60 * 1000,
+        reason
+      );
+
+      await interaction.reply({
+        content:
+          `⏱️ تم إعطاء ${user} تايم أوت لمدة ${minutes} دقيقة.`
+      });
+
+      return;
+    }
+
+    /* =====================================================
+       UNTIMEOUT
+    ===================================================== */
+
+    if (interaction.commandName === "untimeout") {
+      if (
+        !(await requirePermission(
+          interaction,
+          PermissionFlagsBits.ModerateMembers
+        ))
+      ) return;
+
+      const user =
+        interaction.options.getUser("member");
+
+      const member =
+        await interaction.guild.members
+          .fetch(user.id)
+          .catch(() => null);
+
+      if (!member) {
+        return interaction.reply({
+          content: "❌ العضو غير موجود.",
+          ephemeral: true
+        });
+      }
+
+      await member.timeout(null);
+
+      await interaction.reply({
+        content:
+          `♻️ تم إزالة التايم أوت من ${user}.`
+      });
+
+      return;
+    }
+
+    /* =====================================================
+       WARN
+    ===================================================== */
+
+    if (interaction.commandName === "warn") {
+      if (
+        !(await requirePermission(
+          interaction,
+          PermissionFlagsBits.ModerateMembers
+        ))
+      ) return;
+
+      const user =
+        interaction.options.getUser("member");
+
+      const reason =
+        interaction.options.getString("reason");
+
+      await db.query(
+        `
+        INSERT INTO warns
+        (guild_id, user_id, moderator_id, reason)
+        VALUES ($1, $2, $3, $4)
+        `,
+        [
+          interaction.guildId,
+          user.id,
+          interaction.user.id,
+          reason
+        ]
+      );
+
+      await interaction.reply({
+        content:
+          `⚠️ تم تحذير ${user}\n📝 السبب: ${reason}`
+      });
+
+      return;
+    }
+
+    /* =====================================================
+       WARNLIST
+    ===================================================== */
+
+    if (interaction.commandName === "warnlist") {
+      if (
+        !(await requirePermission(
+          interaction,
+          PermissionFlagsBits.ModerateMembers
+        ))
+      ) return;
+
+      const user =
+        interaction.options.getUser("member");
+
+      let result;
+
+      if (user) {
+        result = await db.query(
+          `
+          SELECT *
+          FROM warns
+          WHERE guild_id = $1
+          AND user_id = $2
+          ORDER BY created_at DESC
+          `,
+          [
+            interaction.guildId,
+            user.id
+          ]
+        );
+      } else {
+        result = await db.query(
+          `
+          SELECT *
+          FROM warns
+          WHERE guild_id = $1
+          ORDER BY created_at DESC
+          LIMIT 50
+          `,
+          [
+            interaction.guildId
+          ]
+        );
+      }
+
+      if (!result.rows.length) {
+        return interaction.reply({
+          content: "✅ لا توجد تحذيرات.",
+          ephemeral: true
+        });
+      }
+
+      const lines = result.rows
+        .map((row, i) =>
+          `**${i + 1}.** <@${row.user_id}> — ${row.reason || "بدون سبب"}\n` +
+          `👮 <@${row.moderator_id}> • <t:${Math.floor(new Date(row.created_at).getTime() / 1000)}:R>`
+        )
+        .join("\n\n");
+
+      const embed = new EmbedBuilder()
+        .setColor(0xfee75c)
+        .setTitle("⚠️ قائمة التحذيرات")
+        .setDescription(lines.slice(0, 4000));
+
+      await interaction.reply({
+        embeds: [embed]
+      });
+
+      return;
+    }
+
+    /* =====================================================
+       CLEAR
+    ===================================================== */
+
+    if (interaction.commandName === "clear") {
+      if (
+        !(await requirePermission(
+          interaction,
+          PermissionFlagsBits.ManageMessages
+        ))
+      ) return;
+
+      const amount =
+        interaction.options.getInteger("amount");
+
+      const deleted =
+        await interaction.channel.bulkDelete(
+          amount,
+          true
+        );
+
+      await interaction.reply({
+        content:
+          `🗑️ تم حذف ${deleted.size} رسالة.`,
+        ephemeral: true
+      });
+
+      await sendLog(
+        interaction.guild,
+        "message_bulk_delete",
+        "🗑️ حذف مجموعة رسائل",
+        [
+          `👮 المنفذ: <@${interaction.user.id}>`,
+          `📍 الروم: <#${interaction.channelId}>`,
+          `🔢 العدد: ${deleted.size}`
+        ].join("\n"),
+        0xed4245
+      );
+
+      return;
+    }
+
+    /* =====================================================
+       LOCK
+    ===================================================== */
+
+    if (interaction.commandName === "lock") {
+      if (
+        !(await requirePermission(
+          interaction,
+          PermissionFlagsBits.ManageChannels
+        ))
+      ) return;
+
+      await interaction.channel.permissionOverwrites.edit(
+        interaction.guild.roles.everyone,
+        {
+          SendMessages: false
+        }
+      );
+
+      await interaction.reply({
+        content: "🔒 تم قفل الروم."
+      });
+
+      return;
+    }
+
+    /* =====================================================
+       UNLOCK
+    ===================================================== */
+
+    if (interaction.commandName === "unlock") {
+      if (
+        !(await requirePermission(
+          interaction,
+          PermissionFlagsBits.ManageChannels
+        ))
+      ) return;
+
+      await interaction.channel.permissionOverwrites.edit(
+        interaction.guild.roles.everyone,
+        {
+          SendMessages: null
+        }
+      );
+
+      await interaction.reply({
+        content: "🔓 تم فتح الروم."
+      });
+
+      return;
+    }
+
+    /* =====================================================
+       SLOWMODE
+    ===================================================== */
+
+    if (interaction.commandName === "slowmode") {
+      if (
+        !(await requirePermission(
+          interaction,
+          PermissionFlagsBits.ManageChannels
+        ))
+      ) return;
+
+      const seconds =
+        interaction.options.getInteger("seconds");
+
+      await interaction.channel.setRateLimitPerUser(
+        seconds
+      );
+
+      await interaction.reply({
+        content:
+          `🐌 تم ضبط السلو مود على ${seconds} ثانية.`
+      });
+
+      return;
+    }
+
+    /* =====================================================
+       ROLE
+    ===================================================== */
+
+    if (interaction.commandName === "role") {
+      if (
+        !(await requirePermission(
+          interaction,
+          PermissionFlagsBits.ManageRoles
+        ))
+      ) return;
+
+      const sub =
+        interaction.options.getSubcommand();
+
+      const member =
+        interaction.options.getMember("member");
+
+      const role =
+        interaction.options.getRole("role");
+
+      if (!member) {
+        return interaction.reply({
+          content: "❌ العضو غير موجود.",
+          ephemeral: true
+        });
+      }
+
+      if (sub === "add") {
+        await member.roles.add(role);
+
+        await interaction.reply({
+          content:
+            `✅ تمت إضافة ${role} إلى ${member}.`
+        });
+      }
+
+      if (sub === "remove") {
+        await member.roles.remove(role);
+
+        await interaction.reply({
+          content:
+            `✅ تمت إزالة ${role} من ${member}.`
+        });
+      }
+
+      return;
+    }
+
+    /* =====================================================
+       NICKNAME
+    ===================================================== */
+
+    if (interaction.commandName === "nickname") {
+      if (
+        !(await requirePermission(
+          interaction,
+          PermissionFlagsBits.ManageNicknames
+        ))
+      ) return;
+
+      const member =
+        interaction.options.getMember("member");
+
+      const name =
+        interaction.options.getString("name");
+
+      if (!member) {
+        return interaction.reply({
+          content: "❌ العضو غير موجود.",
+          ephemeral: true
+        });
+      }
+
+      await member.setNickname(name);
+
+      await interaction.reply({
+        content:
+          `✅ تم تغيير اسم ${member} إلى **${name}**.`
+      });
+
+      return;
+    }
+
+    /* =====================================================
+       INFO
+    ===================================================== */
+
+    if (interaction.commandName === "info") {
+      const user =
+        interaction.options.getUser("member") ||
+        interaction.user;
+
+      const member =
+        await interaction.guild.members
+          .fetch(user.id)
+          .catch(() => null);
+
+      const embed = new EmbedBuilder()
+        .setColor(0x5865f2)
+        .setTitle("👤 معلومات العضو")
+        .setThumbnail(user.displayAvatarURL())
+        .addFields(
+          {
+            name: "الاسم",
+            value: `${user}`,
+            inline: true
+          },
+          {
+            name: "ID",
+            value: `\`${user.id}\``,
+            inline: true
+          },
+          {
+            name: "تاريخ الحساب",
+            value:
+              `<t:${Math.floor(user.createdTimestamp / 1000)}:F>`,
+            inline: false
+          }
+        );
+
+      if (member) {
+        embed.addFields({
+          name: "دخل السيرفر",
+          value:
+            `<t:${Math.floor(member.joinedTimestamp / 1000)}:F>`,
+          inline: false
+        });
+      }
+
+      await interaction.reply({
+        embeds: [embed]
+      });
+
+      return;
+    }
+
+    /* =====================================================
+       SERVERINFO
+    ===================================================== */
+
+    if (interaction.commandName === "serverinfo") {
+      const guild = interaction.guild;
+
+      const embed = new EmbedBuilder()
+        .setColor(0x5865f2)
+        .setTitle(`🌐 ${guild.name}`)
+        .setThumbnail(guild.iconURL())
+        .addFields(
+          {
+            name: "👥 الأعضاء",
+            value: `${guild.memberCount}`,
+            inline: true
+          },
+          {
+            name: "💬 الرومات",
+            value: `${guild.channels.cache.size}`,
+            inline: true
+          },
+          {
+            name: "🎭 الرتب",
+            value: `${guild.roles.cache.size}`,
+            inline: true
+          },
+          {
+            name: "🆔 ID",
+            value: `\`${guild.id}\``,
+            inline: false
+          }
+        );
+
+      await interaction.reply({
+        embeds: [embed]
+      });
+
+      return;
+    }
+
+    /* =====================================================
+       AVATAR
+    ===================================================== */
+
+    if (interaction.commandName === "avatar") {
+      const user =
+        interaction.options.getUser("member") ||
+        interaction.user;
+
+      const embed = new EmbedBuilder()
+        .setColor(0x5865f2)
+        .setTitle(`🖼️ افتار ${user.username}`)
+        .setImage(
+          user.displayAvatarURL({
+            size: 4096,
+            extension: "png"
+          })
+        );
+
+      await interaction.reply({
+        embeds: [embed]
+      });
+
+      return;
+    }
+
+    /* =====================================================
+       BANNER
+    ===================================================== */
+
+    if (interaction.commandName === "banner") {
+      const user =
+        interaction.options.getUser("member") ||
+        interaction.user;
+
+      const fullUser =
+        await client.users.fetch(
+          user.id,
+          {
+            force: true
+          }
+        );
+
+      if (!fullUser.banner) {
+        return interaction.reply({
+          content:
+            "❌ هذا العضو لا يملك بنر.",
+          ephemeral: true
+        });
+      }
+
+      const embed = new EmbedBuilder()
+        .setColor(0x5865f2)
+        .setTitle(`🎨 بنر ${fullUser.username}`)
+        .setImage(
+          fullUser.bannerURL({
+            size: 4096
+          })
+        );
+
+      await interaction.reply({
+        embeds: [embed]
+      });
+
+      return;
+    }
+
+    /* =====================================================
+       ROLES
+    ===================================================== */
+
+    if (interaction.commandName === "roles") {
+      const roles =
+        interaction.guild.roles.cache
+          .filter(r => r.id !== interaction.guild.id)
+          .sort(
+            (a, b) => b.position - a.position
           );
+
+      const text =
+        roles
+          .map(r => `${r} — \`${r.name}\``)
+          .join("\n")
+          .slice(0, 4000);
+
+      const embed = new EmbedBuilder()
+        .setColor(0x5865f2)
+        .setTitle("🎭 رتب السيرفر")
+        .setDescription(
+          text || "لا توجد رتب."
+        );
+
+      await interaction.reply({
+        embeds: [embed]
+      });
+
+      return;
+    }
+
+    /* =====================================================
+       AUTOREPLY
+    ===================================================== */
+
+    if (interaction.commandName === "autoreply") {
+      if (
+        !(await requirePermission(
+          interaction,
+          PermissionFlagsBits.ManageGuild
+        ))
+      ) return;
+
+      const sub =
+        interaction.options.getSubcommand();
+
+      if (sub === "add") {
+        const trigger =
+          interaction.options
+            .getString("trigger")
+            .toLowerCase();
+
+        const response =
+          interaction.options
+            .getString("response");
+
+        await db.query(
+          `
+          INSERT INTO autoreplies
+          (guild_id, trigger, response)
+          VALUES ($1, $2, $3)
+          ON CONFLICT (guild_id, trigger)
+          DO UPDATE SET response = EXCLUDED.response
+          `,
+          [
+            interaction.guildId,
+            trigger,
+            response
+          ]
+        );
+
+        await interaction.reply({
+          content:
+            `✅ تم حفظ الرد التلقائي للكلمة **${trigger}**.`
+        });
+      }
+
+      if (sub === "remove") {
+        const trigger =
+          interaction.options
+            .getString("trigger")
+            .toLowerCase();
+
+        const result = await db.query(
+          `
+          DELETE FROM autoreplies
+          WHERE guild_id = $1
+          AND trigger = $2
+          `,
+          [
+            interaction.guildId,
+            trigger
+          ]
+        );
+
+        await interaction.reply({
+          content:
+            result.rowCount
+              ? `🗑️ تم حذف **${trigger}**.`
+              : "❌ الرد غير موجود."
+        });
+      }
+
+      return;
+    }
+
+    /* =====================================================
+       LIST
+    ===================================================== */
+
+    if (interaction.commandName === "list") {
+      const result = await db.query(
+        `
+        SELECT trigger, response
+        FROM autoreplies
+        WHERE guild_id = $1
+        ORDER BY trigger
+        `,
+        [interaction.guildId]
+      );
+
+      if (!result.rows.length) {
+        return interaction.reply({
+          content:
+            "❌ لا توجد ردود تلقائية."
+        });
+      }
+
+      const text = result.rows
+        .map(
+          row =>
+            `**${row.trigger}** → ${row.response}`
+        )
+        .join("\n")
+        .slice(0, 4000);
+
+      await interaction.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(0x5865f2)
+            .setTitle("🤖 الردود التلقائية")
+            .setDescription(text)
+        ]
+      });
+
+      return;
+    }
+
+    /* =====================================================
+       SHORTCUT
+    ===================================================== */
+
+    if (interaction.commandName === "shortcut") {
+      if (
+        !(await requirePermission(
+          interaction,
+          PermissionFlagsBits.ManageGuild
+        ))
+      ) return;
+
+      const sub =
+        interaction.options.getSubcommand();
+
+      if (sub === "set") {
+        const name =
+          interaction.options
+            .getString("name")
+            .toLowerCase();
+
+        const command =
+          interaction.options
+            .getString("command");
+
+        await db.query(
+          `
+          INSERT INTO shortcuts
+          (guild_id, name, command)
+          VALUES ($1, $2, $3)
+          ON CONFLICT (guild_id, name)
+          DO UPDATE SET command = EXCLUDED.command
+          `,
+          [
+            interaction.guildId,
+            name,
+            command
+          ]
+        );
+
+        await interaction.reply({
+          content:
+            `✅ تم حفظ الاختصار **${name}**.`
+        });
+      }
+
+      if (sub === "remove") {
+        const name =
+          interaction.options
+            .getString("name")
+            .toLowerCase();
+
+        const result = await db.query(
+          `
+          DELETE FROM shortcuts
+          WHERE guild_id = $1
+          AND name = $2
+          `,
+          [
+            interaction.guildId,
+            name
+          ]
+        );
+
+        await interaction.reply({
+          content:
+            result.rowCount
+              ? `🗑️ تم حذف الاختصار **${name}**.`
+              : "❌ الاختصار غير موجود."
+        });
+      }
+
+      if (sub === "list") {
+        const result = await db.query(
+          `
+          SELECT name, command
+          FROM shortcuts
+          WHERE guild_id = $1
+          ORDER BY name
+          `,
+          [interaction.guildId]
+        );
+
+        if (!result.rows.length) {
+          return interaction.reply({
+            content:
+              "❌ لا توجد اختصارات."
+          });
+        }
+
+        const text = result.rows
+          .map(
+            row =>
+              `**${row.name}** → \`${row.command}\``
+          )
+          .join("\n");
+
+        await interaction.reply({
+          embeds: [
+            new EmbedBuilder()
+              .setColor(0x5865f2)
+              .setTitle("⚡ الاختصارات")
+              .setDescription(text.slice(0, 4000))
+          ]
+        });
+      }
+
+      return;
+    }
+
+    /* =====================================================
+       LOG
+    ===================================================== */
+
+    if (interaction.commandName === "log") {
+      if (
+        !(await requirePermission(
+          interaction,
+          PermissionFlagsBits.ManageGuild
+        ))
+      ) return;
+
+      const sub =
+        interaction.options.getSubcommand();
+
+      /* ---------------------------------------------------
+         SETUP
+      --------------------------------------------------- */
+
+      if (sub === "setup") {
+        const channel =
+          interaction.options.getChannel("channel");
+
+        if (!channel) {
+          return interaction.reply({
+            content:
+              "❌ الروم غير موجود.",
+            ephemeral: true
+          });
+        }
+
+        const me =
+          interaction.guild.members.me;
+
+        const permissions =
+          channel.permissionsFor(me);
+
+        if (
+          !permissions?.has(
+            PermissionFlagsBits.ViewChannel
+          ) ||
+          !permissions?.has(
+            PermissionFlagsBits.SendMessages
+          ) ||
+          !permissions?.has(
+            PermissionFlagsBits.EmbedLinks
+          )
+        ) {
+          return interaction.reply({
+            content:
+              "❌ البوت يحتاج صلاحيات View Channel و Send Messages و Embed Links في روم اللوق.",
+            ephemeral: true
+          });
+        }
 
         await db.query(
           `
@@ -1469,8 +2855,7 @@ client.on(
           (guild_id, channel_id)
           VALUES ($1, $2)
           ON CONFLICT (guild_id)
-          DO UPDATE SET
-            channel_id = EXCLUDED.channel_id
+          DO UPDATE SET channel_id = EXCLUDED.channel_id
           `,
           [
             interaction.guildId,
@@ -1478,2471 +2863,513 @@ client.on(
           ]
         );
 
+        await getLogConfig(
+          interaction.guildId
+        );
+
         await interaction.reply({
           content:
-            `✅ تم تحديد ${channel} كروم اللوق.\n\nاستخدم الآن \`/log edit\` لاختيار أنواع اللوق.`,
-          ephemeral: true
+            `✅ تم تحديد <#${channel.id}> كروم اللوق.`
         });
+
+        await sendLog(
+          interaction.guild,
+          "guild_update",
+          "✅ تم إعداد نظام اللوق",
+          [
+            `👮 بواسطة: <@${interaction.user.id}>`,
+            `📍 روم اللوق: <#${channel.id}>`
+          ].join("\n"),
+          0x57f287,
+          true
+        );
 
         return;
       }
 
-      /* =====================================================
-         LOG TEST
-      ===================================================== */
+      /* ---------------------------------------------------
+         STATUS
+      --------------------------------------------------- */
 
-      if (
-        interaction.commandName ===
-        "logs"
-      ) {
+      if (sub === "status") {
+        const config =
+          await getLogConfig(
+            interaction.guildId
+          );
 
         const channel =
           await getLogChannel(
             interaction.guild
           );
 
-        if (!channel) {
+        const enabledCount =
+          LOG_TYPE_KEYS.filter(
+            key => config.settings[key]
+          ).length;
 
-          return interaction.reply({
-            content:
-              "❌ لم يتم تحديد روم اللوق.\nاستخدم `/log setup` أولاً.",
-            ephemeral: true
-          });
-        }
+        const disabledCount =
+          LOG_TYPE_KEYS.length -
+          enabledCount;
 
         const embed =
           new EmbedBuilder()
-            .setColor(0x2ECC71)
-            .setTitle(
-              "🧪 اختبار نظام اللوق"
+            .setColor(
+              config.enabled
+                ? 0x57f287
+                : 0xed4245
             )
-            .setDescription(
-              `**بواسطة:** ${interaction.user}\n` +
-              `**السيرفر:** ${interaction.guild.name}\n` +
-              `**الروم:** ${channel}\n\n` +
-              "✅ نظام اللوق يعمل."
-            )
-            .setTimestamp();
+            .setTitle("📋 حالة نظام اللوق")
+            .addFields(
+              {
+                name: "الحالة العامة",
+                value:
+                  config.enabled
+                    ? "🟢 مفعّل"
+                    : "🔴 معطّل",
+                inline: true
+              },
+              {
+                name: "روم اللوق",
+                value:
+                  channel
+                    ? `<#${channel.id}>`
+                    : "❌ غير محدد",
+                inline: true
+              },
+              {
+                name: "الأنواع المفعلة",
+                value:
+                  `${enabledCount}`,
+                inline: true
+              },
+              {
+                name: "الأنواع المعطلة",
+                value:
+                  `${disabledCount}`,
+                inline: true
+              }
+            );
 
-        await channel.send({
-          embeds: [embed]
-        });
+        let list = "";
 
-        return interaction.reply({
-          content:
-            `✅ تم إرسال الاختبار إلى ${channel}.`,
+        for (const key of LOG_TYPE_KEYS) {
+          list +=
+            `${config.settings[key] ? "🟢" : "🔴"} ${LOG_TYPES[key].emoji} ${LOG_TYPES[key].name}\n`;
+        }
+
+        embed.setDescription(
+          list.slice(0, 4000)
+        );
+
+        await interaction.reply({
+          embeds: [embed],
           ephemeral: true
         });
-      }
-
-      /* =====================================================
-         BOT
-      ===================================================== */
-
-      if (
-        interaction.commandName ===
-        "bot"
-      ) {
-
-        const online =
-          client.isReady();
-
-        return interaction.reply({
-
-          embeds: [
-
-            new EmbedBuilder()
-              .setColor(
-                online
-                  ? 0x2ECC71
-                  : 0xE74C3C
-              )
-              .setTitle(
-                "🤖 حالة البوت"
-              )
-              .addFields(
-
-                {
-                  name: "الحالة",
-                  value:
-                    online
-                      ? "🟢 Online"
-                      : "🔴 Offline",
-                  inline: true
-                },
-
-                {
-                  name: "Ping",
-                  value:
-                    online
-                      ? `${client.ws.ping}ms`
-                      : "غير متوفر",
-                  inline: true
-                },
-
-                {
-                  name: "السيرفرات",
-                  value:
-                    `${client.guilds.cache.size}`,
-                  inline: true
-                },
-
-                {
-                  name:
-                    "مدة الاتصال",
-                  value:
-                    online &&
-                    botStartedAt
-                      ? formatUptime(
-                          Date.now() -
-                          botStartedAt
-                        )
-                      : "غير متصل"
-                },
-
-                {
-                  name:
-                    "Owner / Developer",
-                  value:
-                    `<@${OWNER_ID}>`
-                }
-
-              )
-              .setTimestamp()
-
-          ]
-
-        });
-      }
-
-      /* =====================================================
-         ME
-      ===================================================== */
-
-      if (
-        interaction.commandName ===
-        "me"
-      ) {
-
-        return interaction.reply({
-
-          embeds: [
-
-            new EmbedBuilder()
-              .setColor(0xF1C40F)
-              .setTitle(
-                "🤖 معلومات البوت"
-              )
-              .setDescription(
-                `**البوت:** ${client.user}\n` +
-                `**الحالة:** 🟢 Online\n` +
-                `**الأوامر:** ${commands.length}\n` +
-                `**السيرفرات:** ${client.guilds.cache.size}\n` +
-                `**Owner:** <@${OWNER_ID}>\n\n` +
-                `Powered by **.v5d.**`
-              )
-              .setTimestamp()
-
-          ]
-
-        });
-      }
-
-      /* =====================================================
-         BAN
-      ===================================================== */
-
-      if (
-        interaction.commandName ===
-        "ban"
-      ) {
-
-        const user =
-          interaction.options.getUser(
-            "member"
-          );
-
-        const reason =
-          interaction.options.getString(
-            "reason"
-          );
-
-        const member =
-          await interaction.guild.members
-            .fetch(user.id)
-            .catch(() => null);
-
-        if (
-          !member ||
-          !member.bannable
-        ) {
-
-          return interaction.reply({
-            content:
-              "❌ لا أستطيع حظر هذا العضو.",
-            ephemeral: true
-          });
-        }
-
-        await member.ban({
-          reason
-        });
-
-        await interaction.reply(
-          `🔨 تم حظر ${user}\n**السبب:** ${reason}`
-        );
 
         return;
       }
 
-      /* =====================================================
-         UNBAN
-      ===================================================== */
+      /* ---------------------------------------------------
+         ENABLE
+      --------------------------------------------------- */
 
-      if (
-        interaction.commandName ===
-        "unban"
-      ) {
-
-        const id =
-          interaction.options.getString(
-            "userid"
-          );
-
-        try {
-
-          await interaction.guild.members.unban(
-            id
-          );
-
-        } catch {
-
-          return interaction.reply({
-            content:
-              "❌ لم أستطع فك الحظر.",
-            ephemeral: true
-          });
-        }
-
-        await interaction.reply(
-          `🔓 تم فك الحظر عن <@${id}>.`
-        );
-
-        return;
-      }
-
-      /* =====================================================
-         KICK
-      ===================================================== */
-
-      if (
-        interaction.commandName ===
-        "kick"
-      ) {
-
-        const user =
-          interaction.options.getUser(
-            "member"
-          );
-
-        const reason =
-          interaction.options.getString(
-            "reason"
-          );
-
-        const member =
-          await interaction.guild.members
-            .fetch(user.id)
-            .catch(() => null);
-
-        if (
-          !member ||
-          !member.kickable
-        ) {
-
-          return interaction.reply({
-            content:
-              "❌ لا أستطيع طرد هذا العضو.",
-            ephemeral: true
-          });
-        }
-
-        await member.kick(reason);
-
-        await interaction.reply(
-          `👢 تم طرد ${user}\n**السبب:** ${reason}`
-        );
-
-        return;
-      }
-
-      /* =====================================================
-         TIMEOUT
-      ===================================================== */
-
-      if (
-        interaction.commandName ===
-        "timeout"
-      ) {
-
-        const user =
-          interaction.options.getUser(
-            "member"
-          );
-
-        const minutes =
-          interaction.options.getInteger(
-            "minutes"
-          );
-
-        const reason =
-          interaction.options.getString(
-            "reason"
-          );
-
-        const member =
-          await interaction.guild.members
-            .fetch(user.id)
-            .catch(() => null);
-
-        if (
-          !member ||
-          !member.moderatable
-        ) {
-
-          return interaction.reply({
-            content:
-              "❌ لا أستطيع إعطاء Timeout.",
-            ephemeral: true
-          });
-        }
-
-        await member.timeout(
-          minutes * 60 * 1000,
-          reason
-        );
-
-        await interaction.reply(
-          `⏳ تم إعطاء ${user} Timeout لمدة **${minutes} دقيقة**.`
-        );
-
-        return;
-      }
-
-      /* =====================================================
-         UNTIMEOUT
-      ===================================================== */
-
-      if (
-        interaction.commandName ===
-        "untimeout"
-      ) {
-
-        const user =
-          interaction.options.getUser(
-            "member"
-          );
-
-        const member =
-          await interaction.guild.members
-            .fetch(user.id)
-            .catch(() => null);
-
-        if (!member) {
-
-          return interaction.reply({
-            content:
-              "❌ العضو غير موجود.",
-            ephemeral: true
-          });
-        }
-
-        await member.timeout(null);
-
-        await interaction.reply(
-          `✅ تم إزالة Timeout عن ${user}.`
-        );
-
-        return;
-      }
-
-      /* =====================================================
-         WARN
-      ===================================================== */
-
-      if (
-        interaction.commandName ===
-        "warn"
-      ) {
-
-        const user =
-          interaction.options.getUser(
-            "member"
-          );
-
-        const reason =
-          interaction.options.getString(
-            "reason"
-          );
-
+      if (sub === "enable") {
         await db.query(
           `
-          INSERT INTO warns
-          (guild_id,user_id,moderator_id,reason)
-          VALUES ($1,$2,$3,$4)
+          INSERT INTO log_settings
+          (guild_id, enabled, settings)
+          VALUES ($1, TRUE, $2::jsonb)
+          ON CONFLICT (guild_id)
+          DO UPDATE SET enabled = TRUE
           `,
           [
             interaction.guildId,
-            user.id,
-            interaction.user.id,
-            reason
-          ]
-        );
-
-        const count =
-          await db.query(
-            `
-            SELECT COUNT(*)::int AS count
-            FROM warns
-            WHERE guild_id=$1
-            AND user_id=$2
-            `,
-            [
-              interaction.guildId,
-              user.id
-            ]
-          );
-
-        await interaction.reply(
-          `⚠️ تم تحذير ${user}\n**السبب:** ${reason}\n**إجمالي التحذيرات:** ${count.rows[0].count}`
-        );
-
-        return;
-      }
-
-      /* =====================================================
-         WARNLIST
-      ===================================================== */
-
-      if (
-        interaction.commandName ===
-        "warnlist"
-      ) {
-
-        const user =
-          interaction.options.getUser(
-            "member"
-          );
-
-        const result =
-          user
-            ? await db.query(
-                `
-                SELECT *
-                FROM warns
-                WHERE guild_id=$1
-                AND user_id=$2
-                ORDER BY created_at DESC
-                `,
-                [
-                  interaction.guildId,
-                  user.id
-                ]
-              )
-            : await db.query(
-                `
-                SELECT *
-                FROM warns
-                WHERE guild_id=$1
-                ORDER BY created_at DESC
-                LIMIT 25
-                `,
-                [
-                  interaction.guildId
-                ]
-              );
-
-        if (!result.rows.length) {
-
-          return interaction.reply(
-            "✅ لا توجد تحذيرات."
-          );
-        }
-
-        const text =
-          result.rows
-            .map(
-              (w, i) =>
-                `**${i + 1}.** <@${w.user_id}>\n` +
-                `السبب: ${w.reason}\n` +
-                `بواسطة: <@${w.moderator_id}>\n` +
-                `<t:${Math.floor(
-                  new Date(
-                    w.created_at
-                  ).getTime() / 1000
-                )}:R>`
+            JSON.stringify(
+              defaultLogSettings()
             )
-            .join("\n\n");
-
-        return interaction.reply({
-
-          embeds: [
-
-            new EmbedBuilder()
-              .setColor(0xF1C40F)
-              .setTitle(
-                user
-                  ? `⚠️ تحذيرات ${user.username}`
-                  : "⚠️ قائمة التحذيرات"
-              )
-              .setDescription(text)
-
           ]
-
-        });
-      }
-
-      /* =====================================================
-         CLEAR
-      ===================================================== */
-
-      if (
-        interaction.commandName ===
-        "clear"
-      ) {
-
-        const amount =
-          interaction.options.getInteger(
-            "amount"
-          );
-
-        const deleted =
-          await interaction.channel.bulkDelete(
-            amount,
-            true
-          );
+        );
 
         await interaction.reply({
           content:
-            `🧹 تم حذف ${deleted.size} رسالة.`,
+            "🟢 تم تشغيل نظام اللوق بالكامل."
+        });
+
+        return;
+      }
+
+      /* ---------------------------------------------------
+         DISABLE
+      --------------------------------------------------- */
+
+      if (sub === "disable") {
+        await db.query(
+          `
+          INSERT INTO log_settings
+          (guild_id, enabled, settings)
+          VALUES ($1, FALSE, $2::jsonb)
+          ON CONFLICT (guild_id)
+          DO UPDATE SET enabled = FALSE
+          `,
+          [
+            interaction.guildId,
+            JSON.stringify(
+              defaultLogSettings()
+            )
+          ]
+        );
+
+        await interaction.reply({
+          content:
+            "🔴 تم إيقاف نظام اللوق بالكامل."
+        });
+
+        return;
+      }
+
+      /* ---------------------------------------------------
+         EDIT
+      --------------------------------------------------- */
+
+      if (sub === "edit") {
+        const config =
+          await getLogConfig(
+            interaction.guildId
+          );
+
+        const menu =
+          new StringSelectMenuBuilder()
+            .setCustomId(
+              "log_edit_select"
+            )
+            .setPlaceholder(
+              "اختر نوع أو أكثر لتغيير حالته"
+            )
+            .setMinValues(1)
+            .setMaxValues(
+              LOG_TYPE_KEYS.length
+            );
+
+        for (const key of LOG_TYPE_KEYS) {
+          menu.addOptions(
+            new StringSelectMenuOptionBuilder()
+              .setLabel(
+                LOG_TYPES[key].name
+              )
+              .setValue(key)
+              .setEmoji(
+                LOG_TYPES[key].emoji
+              )
+              .setDescription(
+                config.settings[key]
+                  ? "🟢 مفعّل — اضغط لتعطيله"
+                  : "🔴 معطّل — اضغط لتفعيله"
+              )
+          );
+        }
+
+        const row =
+          new ActionRowBuilder()
+            .addComponents(menu);
+
+        await interaction.reply({
+          content:
+            "⚙️ اختر أنواع اللوق التي تريد تغيير حالتها.\n\n🟢 = مفعّل\n🔴 = معطّل\n\n**الاختيار سيقوم بتبديل الحالة مباشرة.**",
+          components: [row],
           ephemeral: true
         });
 
-        await sendLog(
-          interaction.guild,
-          "message_bulk_delete",
-          "🧹 حذف مجموعة رسائل",
-          `**الروم:** ${interaction.channel}\n` +
-          `**العدد:** ${deleted.size}\n` +
-          `**بواسطة:** ${interaction.user}`,
-          0xE74C3C
-        );
-
         return;
       }
+    }
 
-      /* =====================================================
-         LOCK / UNLOCK
-      ===================================================== */
+    /* =====================================================
+       LOGS TEST
+    ===================================================== */
 
+    if (interaction.commandName === "logs") {
       if (
-        interaction.commandName === "lock" ||
-        interaction.commandName === "unlock"
-      ) {
+        !(await requirePermission(
+          interaction,
+          PermissionFlagsBits.ManageGuild
+        ))
+      ) return;
 
-        const locked =
-          interaction.commandName === "lock";
-
-        await interaction.channel.permissionOverwrites.edit(
-          interaction.guild.roles.everyone,
-          {
-            SendMessages: !locked
-          }
+      const channel =
+        await getLogChannel(
+          interaction.guild
         );
 
-        await interaction.reply(
-          locked
-            ? "🔒 تم قفل الروم."
-            : "🔓 تم فتح الروم."
-        );
-
-        await sendLog(
-          interaction.guild,
-          "channel_permissions",
-          locked
-            ? "🔒 قفل الروم"
-            : "🔓 فتح الروم",
-          `**الروم:** ${interaction.channel}\n**بواسطة:** ${interaction.user}`,
-          locked
-            ? 0xE74C3C
-            : 0x2ECC71
-        );
-
-        return;
-      }
-
-      /* =====================================================
-         SLOWMODE
-      ===================================================== */
-
-      if (
-        interaction.commandName ===
-        "slowmode"
-      ) {
-
-        const seconds =
-          interaction.options.getInteger(
-            "seconds"
-          );
-
-        await interaction.channel.setRateLimitPerUser(
-          seconds
-        );
-
-        await interaction.reply(
-          seconds === 0
-            ? "✅ تم إلغاء Slowmode."
-            : `🐌 Slowmode: ${seconds} ثانية`
-        );
-
-        await sendLog(
-          interaction.guild,
-          "channel_update",
-          "🐌 تحديث Slowmode",
-          `**الروم:** ${interaction.channel}\n` +
-          `**المدة:** ${seconds} ثانية\n` +
-          `**بواسطة:** ${interaction.user}`,
-          0x9B59B6
-        );
-
-        return;
-      }
-
-      /* =====================================================
-         ROLE
-      ===================================================== */
-
-      if (
-        interaction.commandName ===
-        "role"
-      ) {
-
-        const user =
-          interaction.options.getUser(
-            "member"
-          );
-
-        const role =
-          interaction.options.getRole(
-            "role"
-          );
-
-        const action =
-          interaction.options.getString(
-            "action"
-          );
-
-        const member =
-          await interaction.guild.members.fetch(
-            user.id
-          );
-
-        if (
-          role.id ===
-          interaction.guild.id
-        ) {
-
-          return interaction.reply({
-            content:
-              "❌ لا يمكن استخدام @everyone.",
-            ephemeral: true
-          });
-        }
-
-        if (
-          role.position >=
-          interaction.guild.members.me.roles.highest.position
-        ) {
-
-          return interaction.reply({
-            content:
-              "❌ رتبة البوت أقل من الرتبة.",
-            ephemeral: true
-          });
-        }
-
-        if (action === "add") {
-
-          await member.roles.add(
-            role
-          );
-
-          await interaction.reply(
-            `✅ تم إعطاء ${user} رتبة ${role}.`
-          );
-
-        } else {
-
-          await member.roles.remove(
-            role
-          );
-
-          await interaction.reply(
-            `✅ تم إزالة ${role} من ${user}.`
-          );
-        }
-
-        return;
-      }
-
-      /* =====================================================
-         NICKNAME
-      ===================================================== */
-
-      if (
-        interaction.commandName ===
-        "nickname"
-      ) {
-
-        const user =
-          interaction.options.getUser(
-            "member"
-          );
-
-        const name =
-          interaction.options.getString(
-            "name"
-          );
-
-        const member =
-          await interaction.guild.members.fetch(
-            user.id
-          );
-
-        await member.setNickname(
-          name
-        );
-
-        await interaction.reply(
-          `✅ تم تغيير اسم ${user} إلى **${name}**.`
-        );
-
-        return;
-      }
-
-      /* =====================================================
-         INFO
-      ===================================================== */
-
-      if (
-        interaction.commandName ===
-        "info"
-      ) {
-
-        const user =
-          interaction.options.getUser(
-            "member"
-          ) ||
-          interaction.user;
-
-        const member =
-          await interaction.guild.members
-            .fetch(user.id)
-            .catch(() => null);
-
+      if (!channel) {
         return interaction.reply({
-
-          embeds: [
-
-            new EmbedBuilder()
-              .setColor(0x3498DB)
-              .setTitle(
-                `👤 معلومات ${user.username}`
-              )
-              .setThumbnail(
-                user.displayAvatarURL({
-                  size: 256
-                })
-              )
-              .addFields(
-
-                {
-                  name: "الاسم",
-                  value: `${user}`,
-                  inline: true
-                },
-
-                {
-                  name: "ID",
-                  value: `\`${user.id}\``,
-                  inline: true
-                },
-
-                {
-                  name: "الحساب",
-                  value:
-                    `<t:${Math.floor(
-                      user.createdTimestamp /
-                      1000
-                    )}:R>`,
-                  inline: true
-                },
-
-                {
-                  name: "دخل السيرفر",
-                  value:
-                    member?.joinedTimestamp
-                      ? `<t:${Math.floor(
-                          member.joinedTimestamp /
-                          1000
-                        )}:R>`
-                      : "غير معروف"
-                }
-
-              )
-
-          ]
-
+          content:
+            "❌ لم يتم تحديد روم اللوق. استخدم `/log setup` أولاً.",
+          ephemeral: true
         });
       }
 
-      /* =====================================================
-         SERVERINFO
-      ===================================================== */
-
-      if (
-        interaction.commandName ===
-        "serverinfo"
-      ) {
-
-        const guild =
-          interaction.guild;
-
-        return interaction.reply({
-
-          embeds: [
-
-            new EmbedBuilder()
-              .setColor(0x3498DB)
-              .setTitle(
-                `🏠 ${guild.name}`
-              )
-              .addFields(
-
-                {
-                  name: "الأعضاء",
-                  value:
-                    `${guild.memberCount}`,
-                  inline: true
-                },
-
-                {
-                  name: "الرومات",
-                  value:
-                    `${guild.channels.cache.size}`,
-                  inline: true
-                },
-
-                {
-                  name: "الرتب",
-                  value:
-                    `${guild.roles.cache.size}`,
-                  inline: true
-                },
-
-                {
-                  name: "ID",
-                  value:
-                    `\`${guild.id}\``
-                }
-
-              )
-
-          ]
-
-        });
-      }
-
-      /* =====================================================
-         AVATAR
-      ===================================================== */
-
-      if (
-        interaction.commandName ===
-        "avatar"
-      ) {
-
-        const user =
-          interaction.options.getUser(
-            "member"
-          ) ||
-          interaction.user;
-
-        return interaction.reply({
-
-          embeds: [
-
-            new EmbedBuilder()
-              .setColor(0x3498DB)
-              .setTitle(
-                `🖼️ Avatar - ${user.username}`
-              )
-              .setImage(
-                user.displayAvatarURL({
-                  size: 1024
-                })
-              )
-
-          ]
-
-        });
-      }
-
-      /* =====================================================
-         BANNER
-      ===================================================== */
-
-      if (
-        interaction.commandName ===
-        "banner"
-      ) {
-
-        const user =
-          interaction.options.getUser(
-            "member"
-          ) ||
-          interaction.user;
-
-        const fetched =
-          await user.fetch();
-
-        const banner =
-          fetched.bannerURL({
-            size: 1024
-          });
-
-        if (!banner) {
-
-          return interaction.reply(
-            "❌ لا يوجد Banner."
-          );
-        }
-
-        return interaction.reply({
-
-          embeds: [
-
-            new EmbedBuilder()
-              .setColor(0x3498DB)
-              .setTitle(
-                `🎨 Banner - ${user.username}`
-              )
-              .setImage(banner)
-
-          ]
-
-        });
-      }
-
-      /* =====================================================
-         ROLES
-      ===================================================== */
-
-      if (
-        interaction.commandName ===
-        "roles"
-      ) {
-
-        const user =
-          interaction.options.getUser(
-            "member"
-          ) ||
-          interaction.user;
-
-        const member =
-          await interaction.guild.members.fetch(
-            user.id
-          );
-
-        const roles =
-          member.roles.cache
-            .filter(
-              r =>
-                r.id !==
-                interaction.guild.id
-            )
-            .sort(
-              (a, b) =>
-                b.position -
-                a.position
-            )
-            .map(
-              r => `${r}`
-            )
-            .join(" ");
-
-        return interaction.reply({
-
-          embeds: [
-
-            new EmbedBuilder()
-              .setColor(0x9B59B6)
-              .setTitle(
-                `🎭 رتب ${user.username}`
-              )
-              .setDescription(
-                roles ||
-                "لا توجد رتب."
-              )
-
-          ]
-
-        });
-      }
-
-      /* =====================================================
-         AUTOREPLY
-      ===================================================== */
-
-      if (
-        interaction.commandName ===
-        "autoreply"
-      ) {
-
-        const sub =
-          interaction.options.getSubcommand();
-
-        if (sub === "add") {
-
-          const trigger =
-            interaction.options
-              .getString("trigger")
-              .toLowerCase();
-
-          const response =
-            interaction.options
-              .getString("response");
-
-          await db.query(
-            `
-            INSERT INTO autoreplies
-            (guild_id,trigger,response)
-            VALUES ($1,$2,$3)
-            ON CONFLICT
-            (guild_id,trigger)
-            DO UPDATE SET
-              response=EXCLUDED.response
-            `,
-            [
-              interaction.guildId,
-              trigger,
-              response
-            ]
-          );
-
-          return interaction.reply(
-            `✅ تم إضافة الرد:\n**${trigger}** → ${response}`
-          );
-        }
-
-        if (sub === "remove") {
-
-          const trigger =
-            interaction.options
-              .getString("trigger")
-              .toLowerCase();
-
-          const result =
-            await db.query(
-              `
-              DELETE FROM autoreplies
-              WHERE guild_id=$1
-              AND trigger=$2
-              `,
-              [
-                interaction.guildId,
-                trigger
-              ]
-            );
-
-          return interaction.reply(
-            result.rowCount
-              ? `🗑️ تم حذف **${trigger}**.`
-              : `❌ غير موجود.`
-          );
-        }
-
-        if (sub === "list") {
-
-          const result =
-            await db.query(
-              `
-              SELECT trigger,response
-              FROM autoreplies
-              WHERE guild_id=$1
-              ORDER BY trigger
-              `,
-              [
-                interaction.guildId
-              ]
-            );
-
-          if (!result.rows.length) {
-            return interaction.reply(
-              "📭 لا توجد ردود."
-            );
-          }
-
-          return interaction.reply({
-
-            embeds: [
-
-              new EmbedBuilder()
-                .setColor(0x3498DB)
-                .setTitle(
-                  "🤖 الردود التلقائية"
-                )
-                .setDescription(
-                  result.rows
-                    .map(
-                      r =>
-                        `**${r.trigger}** → ${r.response}`
-                    )
-                    .join("\n")
-                )
-
-            ]
-
-          });
-        }
-      }
-
-      /* =====================================================
-         SHORTCUT
-      ===================================================== */
-
-      if (
-        interaction.commandName ===
-        "shortcut"
-      ) {
-
-        const sub =
-          interaction.options.getSubcommand();
-
-        if (sub === "set") {
-
-          const shortcut =
-            interaction.options
-              .getString("shortcut")
-              .toLowerCase();
-
-          const command =
-            interaction.options
-              .getString("command")
-              .toLowerCase()
-              .replace(
-                /^\//,
-                ""
-              );
-
-          await db.query(
-            `
-            INSERT INTO shortcuts
-            (guild_id,shortcut,command)
-            VALUES ($1,$2,$3)
-            ON CONFLICT
-            (guild_id,shortcut)
-            DO UPDATE SET
-              command=EXCLUDED.command
-            `,
-            [
-              interaction.guildId,
-              shortcut,
-              command
-            ]
-          );
-
-          return interaction.reply(
-            `✅ تم إنشاء **${shortcut}** → \`/${command}\``
-          );
-        }
-
-        if (sub === "remove") {
-
-          const shortcut =
-            interaction.options
-              .getString("shortcut")
-              .toLowerCase();
-
-          const result =
-            await db.query(
-              `
-              DELETE FROM shortcuts
-              WHERE guild_id=$1
-              AND shortcut=$2
-              `,
-              [
-                interaction.guildId,
-                shortcut
-              ]
-            );
-
-          return interaction.reply(
-            result.rowCount
-              ? `🗑️ تم حذف **${shortcut}**.`
-              : `❌ غير موجود.`
-          );
-        }
-
-        if (sub === "list") {
-
-          const result =
-            await db.query(
-              `
-              SELECT shortcut,command
-              FROM shortcuts
-              WHERE guild_id=$1
-              ORDER BY shortcut
-              `,
-              [
-                interaction.guildId
-              ]
-            );
-
-          if (!result.rows.length) {
-            return interaction.reply(
-              "📭 لا توجد اختصارات."
-            );
-          }
-
-          return interaction.reply({
-
-            embeds: [
-
-              new EmbedBuilder()
-                .setColor(0x9B59B6)
-                .setTitle(
-                  "🔗 الاختصارات"
-                )
-                .setDescription(
-                  result.rows
-                    .map(
-                      r =>
-                        `**${r.shortcut}** → \`/${r.command}\``
-                    )
-                    .join("\n")
-                )
-
-            ]
-
-          });
-        }
-      }
-
-    } catch (error) {
-
-      console.error(
-        "❌ Interaction Error:",
-        error
+      await interaction.reply({
+        content:
+          `✅ تم إرسال اختبار إلى <#${channel.id}>.`,
+        ephemeral: true
+      });
+
+      await sendLog(
+        interaction.guild,
+        "guild_update",
+        "🧪 اختبار نظام اللوق",
+        [
+          `👤 بواسطة: <@${interaction.user.id}>`,
+          "✅ نظام اللوق يعمل بشكل صحيح."
+        ].join("\n"),
+        0x5865f2,
+        true
       );
 
-      if (
-        interaction.replied ||
-        interaction.deferred
-      ) {
+      return;
+    }
 
+    /* =====================================================
+       BOT
+    ===================================================== */
+
+    if (interaction.commandName === "bot") {
+      const session =
+        await db.query(
+          `
+          SELECT started_at
+          FROM bot_sessions
+          ORDER BY id DESC
+          LIMIT 1
+          `
+        );
+
+      const startedAt =
+        session.rows[0]?.started_at;
+
+      const uptime =
+        client.uptime || 0;
+
+      const seconds =
+        Math.floor(uptime / 1000);
+
+      const days =
+        Math.floor(seconds / 86400);
+
+      const hours =
+        Math.floor(
+          (seconds % 86400) / 3600
+        );
+
+      const minutes =
+        Math.floor(
+          (seconds % 3600) / 60
+        );
+
+      const secs =
+        seconds % 60;
+
+      const embed =
+        new EmbedBuilder()
+          .setColor(0x57f287)
+          .setTitle("🤖 معلومات البوت")
+          .setThumbnail(
+            client.user.displayAvatarURL()
+          )
+          .addFields(
+            {
+              name: "📡 الحالة",
+              value: "🟢 متصل",
+              inline: true
+            },
+            {
+              name: "🏠 السيرفرات",
+              value:
+                `${client.guilds.cache.size}`,
+              inline: true
+            },
+            {
+              name: "⏱️ مدة التشغيل",
+              value:
+                `${days} يوم، ${hours} ساعة، ${minutes} دقيقة، ${secs} ثانية`,
+              inline: false
+            },
+            {
+              name: "🚀 آخر تشغيل",
+              value:
+                startedAt
+                  ? `<t:${Math.floor(new Date(startedAt).getTime() / 1000)}:F>`
+                  : "غير معروف",
+              inline: false
+            }
+          );
+
+      await interaction.reply({
+        embeds: [embed]
+      });
+
+      return;
+    }
+
+    /* =====================================================
+       ME
+    ===================================================== */
+
+    if (interaction.commandName === "me") {
+      const embed =
+        new EmbedBuilder()
+          .setColor(0x5865f2)
+          .setTitle("🤖 مين أنا؟")
+          .setDescription(
+            "أنا بوت خاص لـ **.v5d.**\n\n" +
+            "ولدي سيرفر **Mr Nova**.\n\n" +
+            "أعمل على الإدارة، الحماية، اللوق، والتحكم بالسيرفر."
+          );
+
+      await interaction.reply({
+        embeds: [embed]
+      });
+
+      return;
+    }
+
+  } catch (error) {
+    console.error(
+      "INTERACTION ERROR:",
+      error
+    );
+
+    try {
+      if (interaction.replied || interaction.deferred) {
         await interaction.followUp({
           content:
             "❌ حدث خطأ أثناء تنفيذ الأمر.",
           ephemeral: true
-        }).catch(() => {});
-
+        });
       } else {
-
         await interaction.reply({
           content:
             "❌ حدث خطأ أثناء تنفيذ الأمر.",
           ephemeral: true
-        }).catch(() => {});
+        });
       }
-    }
+    } catch {}
   }
-);
+});
 
 /* =========================================================
-   AUTO REPLY + SHORTCUTS
+   AUTOREPLY MESSAGE HANDLER
 ========================================================= */
 
-client.on(
-  "messageCreate",
-  async message => {
+client.on("messageCreate", async message => {
+  if (
+    !message.guild ||
+    message.author.bot
+  ) return;
 
-    if (
-      message.author.bot ||
-      !message.guild
-    ) {
-      return;
+  try {
+    const content =
+      message.content
+        .trim()
+        .toLowerCase();
+
+    if (!content) return;
+
+    const result =
+      await db.query(
+        `
+        SELECT response
+        FROM autoreplies
+        WHERE guild_id = $1
+        AND trigger = $2
+        LIMIT 1
+        `,
+        [
+          message.guild.id,
+          content
+        ]
+      );
+
+    if (result.rows.length) {
+      await message.reply(
+        result.rows[0].response
+      );
     }
 
-    try {
+    /* SHORTCUTS */
 
-      const text =
-        message.content
-          .trim()
-          .toLowerCase();
-
-      if (!text) {
-        return;
-      }
-
-      const auto =
-        await db.query(
-          `
-          SELECT response
-          FROM autoreplies
-          WHERE guild_id=$1
-          AND trigger=$2
-          LIMIT 1
-          `,
-          [
-            message.guild.id,
-            text
-          ]
-        );
-
-      if (auto.rows.length) {
-
-        await message.reply(
-          auto.rows[0].response
-        );
-
-        return;
-      }
+    if (content.startsWith("!")) {
+      const name =
+        content.slice(1).trim();
 
       const shortcut =
         await db.query(
           `
           SELECT command
           FROM shortcuts
-          WHERE guild_id=$1
-          AND shortcut=$2
+          WHERE guild_id = $1
+          AND name = $2
           LIMIT 1
           `,
           [
             message.guild.id,
-            text
+            name
           ]
         );
 
       if (shortcut.rows.length) {
-
-        await message.reply(
-          `🔗 **${text}** → \`/${shortcut.rows[0].command}\``
-        );
-      }
-
-    } catch (error) {
-
-      console.error(
-        "❌ Message Error:",
-        error.message
-      );
-    }
-  }
-);
-
-/* =========================================================
-   MESSAGE DELETE
-========================================================= */
-
-client.on(
-  "messageDelete",
-  async message => {
-
-    if (
-      !message.guild ||
-      message.author?.bot
-    ) {
-      return;
-    }
-
-    await sendLog(
-      message.guild,
-      "message_delete",
-      "🗑️ حذف رسالة",
-      `**العضو:** ${message.author || "غير معروف"}\n` +
-      `**الروم:** ${message.channel}\n` +
-      `**الرسالة:** ${message.content || "غير متوفرة"}\n` +
-      `**ID:** \`${message.id}\``,
-      0xE74C3C
-    );
-  }
-);
-
-/* =========================================================
-   MESSAGE UPDATE
-========================================================= */
-
-client.on(
-  "messageUpdate",
-  async (
-    oldMessage,
-    newMessage
-  ) => {
-
-    if (
-      !newMessage.guild ||
-      newMessage.author?.bot
-    ) {
-      return;
-    }
-
-    const oldContent =
-      oldMessage.content || "";
-
-    const newContent =
-      newMessage.content || "";
-
-    if (
-      oldContent ===
-      newContent
-    ) {
-      return;
-    }
-
-    await sendLog(
-      newMessage.guild,
-      "message_update",
-      "✏️ تعديل رسالة",
-      `**العضو:** ${newMessage.author || "غير معروف"}\n` +
-      `**الروم:** ${newMessage.channel}\n\n` +
-      `**قبل:**\n${oldContent || "فارغة"}\n\n` +
-      `**بعد:**\n${newContent || "فارغة"}`,
-      0xF1C40F
-    );
-  }
-);
-
-/* =========================================================
-   MEMBER JOIN
-========================================================= */
-
-client.on(
-  "guildMemberAdd",
-  async member => {
-
-    await sendLog(
-      member.guild,
-      "member_join",
-      "🟢 إنضمام الأعضاء",
-      `**العضو:** ${member.user}\n` +
-      `**الاسم:** ${member.user.username}\n` +
-      `**ID:** \`${member.id}\``,
-      0x2ECC71
-    );
-  }
-);
-
-/* =========================================================
-   MEMBER LEAVE / KICK
-========================================================= */
-
-client.on(
-  "guildMemberRemove",
-  async member => {
-
-    const executor =
-      await getAuditExecutor(
-        member.guild,
-        AuditLogEvent.MemberKick,
-        member.id
-      );
-
-    if (executor) {
-
-      await sendLog(
-        member.guild,
-        "member_kick",
-        "👢 طرد الأعضاء",
-        `**العضو:** ${member.user}\n` +
-        `**الإداري:** ${executor}\n` +
-        `**ID:** \`${member.id}\``,
-        0xE67E22
-      );
-
-    } else {
-
-      await sendLog(
-        member.guild,
-        "member_leave",
-        "🔴 خروج الأعضاء",
-        `**العضو:** ${member.user || "غير معروف"}\n` +
-        `**ID:** \`${member.id}\``,
-        0xE74C3C
-      );
-    }
-  }
-);
-
-/* =========================================================
-   MEMBER UPDATE
-========================================================= */
-
-client.on(
-  "guildMemberUpdate",
-  async (
-    oldMember,
-    newMember
-  ) => {
-
-    /* ================= ROLES ================= */
-
-    const oldRoles =
-      oldMember.roles.cache;
-
-    const newRoles =
-      newMember.roles.cache;
-
-    const added =
-      newRoles.filter(
-        r =>
-          !oldRoles.has(r.id)
-      );
-
-    const removed =
-      oldRoles.filter(
-        r =>
-          !newRoles.has(r.id)
-      );
-
-    if (
-      added.size ||
-      removed.size
-    ) {
-
-      let text =
-        `**العضو:** ${newMember.user}\n`;
-
-      if (added.size) {
-
-        text +=
-          `**تمت الإضافة:** ${added.map(r => `${r}`).join(" ")}\n`;
-      }
-
-      if (removed.size) {
-
-        text +=
-          `**تمت الإزالة:** ${removed.map(r => `${r}`).join(" ")}\n`;
-      }
-
-      const executor =
-        await getAuditExecutor(
-          newMember.guild,
-          AuditLogEvent.MemberRoleUpdate,
-          newMember.id
-        );
-
-      if (executor) {
-
-        text +=
-          `**بواسطة:** ${executor}`;
-      }
-
-      await sendLog(
-        newMember.guild,
-        "member_roles",
-        "🎭 تحديث رُتب الأعضاء",
-        text,
-        0x9B59B6
-      );
-    }
-
-    /* ================= TIMEOUT ================= */
-
-    const oldTimeout =
-      oldMember.communicationDisabledUntilTimestamp;
-
-    const newTimeout =
-      newMember.communicationDisabledUntilTimestamp;
-
-    if (
-      oldTimeout !==
-      newTimeout
-    ) {
-
-      if (
-        newTimeout &&
-        newTimeout > Date.now()
-      ) {
-
-        const executor =
-          await getAuditExecutor(
-            newMember.guild,
-            AuditLogEvent.MemberUpdate,
-            newMember.id
-          );
-
-        await sendLog(
-          newMember.guild,
-          "timeout",
-          "⏳ إضافة Timeout",
-          `**العضو:** ${newMember.user}\n` +
-          `**ينتهي:** <t:${Math.floor(newTimeout / 1000)}:F>\n` +
-          `**بواسطة:** ${executor || "غير معروف"}`,
-          0x9B59B6
-        );
-
-        await sendLog(
-          newMember.guild,
-          "mute",
-          "🔇 سجل الميوت",
-          `**العضو:** ${newMember.user}\n` +
-          `**النوع:** Timeout\n` +
-          `**ينتهي:** <t:${Math.floor(newTimeout / 1000)}:F>\n` +
-          `**بواسطة:** ${executor || "غير معروف"}`,
-          0x9B59B6
-        );
-
-      } else {
-
-        const executor =
-          await getAuditExecutor(
-            newMember.guild,
-            AuditLogEvent.MemberUpdate,
-            newMember.id
-          );
-
-        await sendLog(
-          newMember.guild,
-          "untimeout",
-          "🔊 إزالة Timeout",
-          `**العضو:** ${newMember.user}\n` +
-          `**بواسطة:** ${executor || "غير معروف"}`,
-          0x2ECC71
-        );
+        await message.reply({
+          content:
+            shortcut.rows[0].command
+        });
       }
     }
-
-    /* ================= NICKNAME ================= */
-
-    if (
-      oldMember.nickname !==
-      newMember.nickname
-    ) {
-
-      await sendLog(
-        newMember.guild,
-        "member_roles",
-        "✏️ تغيير اسم العضو",
-        `**العضو:** ${newMember.user}\n` +
-        `**السابق:** ${oldMember.nickname || oldMember.user.username}\n` +
-        `**الجديد:** ${newMember.nickname || newMember.user.username}`,
-        0x3498DB
-      );
-    }
-  }
-);
-
-/* =========================================================
-   BAN
-========================================================= */
-
-client.on(
-  "guildBanAdd",
-  async ban => {
-
-    const executor =
-      await getAuditExecutor(
-        ban.guild,
-        AuditLogEvent.MemberBanAdd,
-        ban.user.id
-      );
-
-    await sendLog(
-      ban.guild,
-      "ban",
-      "🔨 حظر الأعضاء",
-      `**العضو:** ${ban.user}\n` +
-      `**ID:** \`${ban.user.id}\`\n` +
-      `**الإداري:** ${executor || "غير معروف"}`,
-      0xE74C3C
+  } catch (error) {
+    console.error(
+      "MESSAGE HANDLER ERROR:",
+      error.message
     );
   }
-);
-
-/* =========================================================
-   UNBAN
-========================================================= */
-
-client.on(
-  "guildBanRemove",
-  async ban => {
-
-    const executor =
-      await getAuditExecutor(
-        ban.guild,
-        AuditLogEvent.MemberBanRemove,
-        ban.user.id
-      );
-
-    await sendLog(
-      ban.guild,
-      "unban",
-      "🔓 إزالة حظر الأعضاء",
-      `**العضو:** ${ban.user}\n` +
-      `**ID:** \`${ban.user.id}\`\n` +
-      `**الإداري:** ${executor || "غير معروف"}`,
-      0x2ECC71
-    );
-  }
-);
-
-/* =========================================================
-   ROLE CREATE
-========================================================= */
-
-client.on(
-  "roleCreate",
-  async role => {
-
-    const executor =
-      await getAuditExecutor(
-        role.guild,
-        AuditLogEvent.RoleCreate,
-        role.id
-      );
-
-    await sendLog(
-      role.guild,
-      "role_create",
-      "🟢 إنشاء الرُتب",
-      `**الرتبة:** ${role}\n` +
-      `**الاسم:** ${role.name}\n` +
-      `**بواسطة:** ${executor || "غير معروف"}`,
-      0x2ECC71
-    );
-  }
-);
-
-/* =========================================================
-   ROLE DELETE
-========================================================= */
-
-client.on(
-  "roleDelete",
-  async role => {
-
-    const executor =
-      await getAuditExecutor(
-        role.guild,
-        AuditLogEvent.RoleDelete,
-        role.id
-      );
-
-    await sendLog(
-      role.guild,
-      "role_delete",
-      "🔴 حذف الرُتب",
-      `**الرتبة:** ${role.name}\n` +
-      `**ID:** \`${role.id}\`\n` +
-      `**بواسطة:** ${executor || "غير معروف"}`,
-      0xE74C3C
-    );
-  }
-);
-
-/* =========================================================
-   ROLE UPDATE
-========================================================= */
-
-client.on(
-  "roleUpdate",
-  async (
-    oldRole,
-    newRole
-  ) => {
-
-    if (
-      oldRole.name ===
-        newRole.name &&
-      oldRole.color ===
-        newRole.color &&
-      oldRole.permissions.bitfield ===
-        newRole.permissions.bitfield &&
-      oldRole.mentionable ===
-        newRole.mentionable
-    ) {
-      return;
-    }
-
-    const executor =
-      await getAuditExecutor(
-        newRole.guild,
-        AuditLogEvent.RoleUpdate,
-        newRole.id
-      );
-
-    const permissionChanged =
-      oldRole.permissions.bitfield !==
-      newRole.permissions.bitfield;
-
-    await sendLog(
-      newRole.guild,
-      permissionChanged
-        ? "role_permissions"
-        : "role_update",
-      permissionChanged
-        ? "🔐 تحديث صلاحيات الرُتب"
-        : "✏️ تحديث الرُتب",
-      `**الرتبة:** ${newRole}\n` +
-      `**الاسم السابق:** ${oldRole.name}\n` +
-      `**الاسم الجديد:** ${newRole.name}\n` +
-      `**بواسطة:** ${executor || "غير معروف"}`,
-      0xF1C40F
-    );
-  }
-);
-
-/* =========================================================
-   CHANNEL CREATE
-========================================================= */
-
-client.on(
-  "channelCreate",
-  async channel => {
-
-    if (!channel.guild) {
-      return;
-    }
-
-    const executor =
-      await getAuditExecutor(
-        channel.guild,
-        AuditLogEvent.ChannelCreate,
-        channel.id
-      );
-
-    await sendLog(
-      channel.guild,
-      "channel_create",
-      "🟢 إنشاء الرومات",
-      `**الروم:** ${channel}\n` +
-      `**الاسم:** ${channel.name}\n` +
-      `**بواسطة:** ${executor || "غير معروف"}`,
-      0x2ECC71
-    );
-  }
-);
-
-/* =========================================================
-   CHANNEL DELETE
-========================================================= */
-
-client.on(
-  "channelDelete",
-  async channel => {
-
-    if (!channel.guild) {
-      return;
-    }
-
-    const executor =
-      await getAuditExecutor(
-        channel.guild,
-        AuditLogEvent.ChannelDelete,
-        channel.id
-      );
-
-    await sendLog(
-      channel.guild,
-      "channel_delete",
-      "🔴 حذف الرومات",
-      `**الروم:** ${channel.name}\n` +
-      `**ID:** \`${channel.id}\`\n` +
-      `**بواسطة:** ${executor || "غير معروف"}`,
-      0xE74C3C
-    );
-  }
-);
-
-/* =========================================================
-   CHANNEL UPDATE
-========================================================= */
-
-client.on(
-  "channelUpdate",
-  async (
-    oldChannel,
-    newChannel
-  ) => {
-
-    if (!newChannel.guild) {
-      return;
-    }
-
-    const changes = [];
-
-    if (
-      oldChannel.name !==
-      newChannel.name
-    ) {
-      changes.push(
-        `**الاسم:** ${oldChannel.name} → ${newChannel.name}`
-      );
-    }
-
-    if (
-      oldChannel.topic !==
-      newChannel.topic
-    ) {
-      changes.push(
-        "**تم تغيير وصف الروم**"
-      );
-    }
-
-    if (
-      oldChannel.rateLimitPerUser !==
-      newChannel.rateLimitPerUser
-    ) {
-      changes.push(
-        `**Slowmode:** ${oldChannel.rateLimitPerUser || 0} → ${newChannel.rateLimitPerUser || 0}`
-      );
-    }
-
-    if (!changes.length) {
-      return;
-    }
-
-    const executor =
-      await getAuditExecutor(
-        newChannel.guild,
-        AuditLogEvent.ChannelUpdate,
-        newChannel.id
-      );
-
-    await sendLog(
-      newChannel.guild,
-      "channel_update",
-      "✏️ تحديث الرومات",
-      `**الروم:** ${newChannel}\n` +
-      changes.join("\n") +
-      `\n**بواسطة:** ${executor || "غير معروف"}`,
-      0xF1C40F
-    );
-  }
-);
-
-/* =========================================================
-   CHANNEL OVERWRITE UPDATE
-========================================================= */
-
-client.on(
-  "channelUpdate",
-  async (
-    oldChannel,
-    newChannel
-  ) => {
-
-    if (!newChannel.guild) {
-      return;
-    }
-
-    if (
-      !oldChannel.permissionOverwrites ||
-      !newChannel.permissionOverwrites
-    ) {
-      return;
-    }
-
-    const oldPerms =
-      oldChannel.permissionOverwrites.cache;
-
-    const newPerms =
-      newChannel.permissionOverwrites.cache;
-
-    if (
-      oldPerms.size ===
-        newPerms.size &&
-      oldPerms.every(
-        (oldOverwrite, id) => {
-
-          const newOverwrite =
-            newPerms.get(id);
-
-          if (!newOverwrite) {
-            return false;
-          }
-
-          return (
-            oldOverwrite.allow.bitfield ===
-              newOverwrite.allow.bitfield &&
-            oldOverwrite.deny.bitfield ===
-              newOverwrite.deny.bitfield
-          );
-        }
-      )
-    ) {
-      return;
-    }
-
-    const executor =
-      await getAuditExecutor(
-        newChannel.guild,
-        AuditLogEvent.ChannelOverwriteUpdate,
-        newChannel.id
-      );
-
-    await sendLog(
-      newChannel.guild,
-      "channel_permissions",
-      "🔐 تحديث صلاحيات الرومات",
-      `**الروم:** ${newChannel}\n` +
-      `**بواسطة:** ${executor || "غير معروف"}`,
-      0x9B59B6
-    );
-  }
-);
-
-/* =========================================================
-   VOICE
-========================================================= */
-
-client.on(
-  "voiceStateUpdate",
-  async (
-    oldState,
-    newState
-  ) => {
-
-    const member =
-      newState.member ||
-      oldState.member;
-
-    if (!member) {
-      return;
-    }
-
-    /* ================= JOIN ================= */
-
-    if (
-      !oldState.channelId &&
-      newState.channelId
-    ) {
-
-      await sendLog(
-        member.guild,
-        "voice_join",
-        "🔊 دخول صوتي",
-        `**العضو:** ${member.user}\n` +
-        `**الروم:** ${newState.channel}`,
-        0x2ECC71
-      );
-
-      return;
-    }
-
-    /* ================= LEAVE ================= */
-
-    if (
-      oldState.channelId &&
-      !newState.channelId
-    ) {
-
-      await sendLog(
-        member.guild,
-        "voice_leave",
-        "🔇 خروج صوتي",
-        `**العضو:** ${member.user}\n` +
-        `**الروم:** ${oldState.channel}`,
-        0xE74C3C
-      );
-
-      return;
-    }
-
-    /* ================= MOVE ================= */
-
-    if (
-      oldState.channelId &&
-      newState.channelId &&
-      oldState.channelId !==
-        newState.channelId
-    ) {
-
-      const executor =
-        await getAuditExecutor(
-          member.guild,
-          AuditLogEvent.MemberMove,
-          member.id
-        );
-
-      await sendLog(
-        member.guild,
-        "voice_move",
-        "🔄 تنقل/سحب الأعضاء",
-        `**العضو:** ${member.user}\n` +
-        `**من:** ${oldState.channel}\n` +
-        `**إلى:** ${newState.channel}\n` +
-        `**بواسطة:** ${executor || "غير معروف"}`,
-        0x3498DB
-      );
-
-      return;
-    }
-
-    /* ================= SERVER MUTE ================= */
-
-    if (
-      oldState.serverMute !==
-      newState.serverMute
-    ) {
-
-      await sendLog(
-        member.guild,
-        "mute",
-        newState.serverMute
-          ? "🔇 سجل الميوت"
-          : "🔊 إزالة الميوت",
-        `**العضو:** ${member.user}\n` +
-        `**الحالة:** ${
-          newState.serverMute
-            ? "تم منعه من التحدث"
-            : "تم السماح له بالتحدث"
-        }`,
-        newState.serverMute
-          ? 0xE74C3C
-          : 0x2ECC71
-      );
-
-      await sendLog(
-        member.guild,
-        "voice_speak",
-        newState.serverMute
-          ? "🔇 منع التحدث"
-          : "🔊 السماح بالتحدث",
-        `**العضو:** ${member.user}\n` +
-        `**الحالة:** ${
-          newState.serverMute
-            ? "ممنوع"
-            : "مسموح"
-        }`,
-        newState.serverMute
-          ? 0xE74C3C
-          : 0x2ECC71
-      );
-    }
-
-    /* ================= SERVER DEAF ================= */
-
-    if (
-      oldState.serverDeaf !==
-      newState.serverDeaf
-    ) {
-
-      await sendLog(
-        member.guild,
-        "voice_listen",
-        newState.serverDeaf
-          ? "🔇 منع الإستماع"
-          : "🔊 السماح بالإستماع",
-        `**العضو:** ${member.user}\n` +
-        `**الحالة:** ${
-          newState.serverDeaf
-            ? "ممنوع"
-            : "مسموح"
-        }`,
-        newState.serverDeaf
-          ? 0xE74C3C
-          : 0x2ECC71
-      );
-    }
-  }
-);
-
-/* =========================================================
-   GUILD UPDATE
-========================================================= */
-
-client.on(
-  "guildUpdate",
-  async (
-    oldGuild,
-    newGuild
-  ) => {
-
-    const changes = [];
-
-    if (
-      oldGuild.name !==
-      newGuild.name
-    ) {
-      changes.push(
-        `**اسم السيرفر:** ${oldGuild.name} → ${newGuild.name}`
-      );
-    }
-
-    if (
-      oldGuild.icon !==
-      newGuild.icon
-    ) {
-      changes.push(
-        "**تم تحديث صورة السيرفر**"
-      );
-    }
-
-    if (
-      oldGuild.banner !==
-      newGuild.banner
-    ) {
-      changes.push(
-        "**تم تحديث بنر السيرفر**"
-      );
-    }
-
-    if (!changes.length) {
-      return;
-    }
-
-    const executor =
-      await getAuditExecutor(
-        newGuild,
-        AuditLogEvent.GuildUpdate,
-        newGuild.id
-      );
-
-    await sendLog(
-      newGuild,
-      "guild_update",
-      "⚙️ تحديث إعدادات السيرفر",
-      changes.join("\n") +
-      `\n**بواسطة:** ${executor || "غير معروف"}`,
-      0x3498DB
-    );
-  }
-);
-
-/* =========================================================
-   EMOJI UPDATE
-========================================================= */
-
-client.on(
-  "emojiCreate",
-  async emoji => {
-
-    const executor =
-      await getAuditExecutor(
-        emoji.guild,
-        AuditLogEvent.EmojiCreate,
-        emoji.id
-      );
-
-    await sendLog(
-      emoji.guild,
-      "emoji_create",
-      "😀 إضافة إيموجي",
-      `**الإيموجي:** ${emoji}\n` +
-      `**الاسم:** ${emoji.name}\n` +
-      `**بواسطة:** ${executor || "غير معروف"}`,
-      0x2ECC71
-    );
-  }
-);
-
-client.on(
-  "emojiDelete",
-  async emoji => {
-
-    const executor =
-      await getAuditExecutor(
-        emoji.guild,
-        AuditLogEvent.EmojiDelete,
-        emoji.id
-      );
-
-    await sendLog(
-      emoji.guild,
-      "emoji_delete",
-      "🗑️ حذف إيموجي",
-      `**الاسم:** ${emoji.name}\n` +
-      `**ID:** \`${emoji.id}\`\n` +
-      `**بواسطة:** ${executor || "غير معروف"}`,
-      0xE74C3C
-    );
-  }
-);
-
-client.on(
-  "emojiUpdate",
-  async (
-    oldEmoji,
-    newEmoji
-  ) => {
-
-    const executor =
-      await getAuditExecutor(
-        newEmoji.guild,
-        AuditLogEvent.EmojiUpdate,
-        newEmoji.id
-      );
-
-    await sendLog(
-      newEmoji.guild,
-      "emoji_update",
-      "✏️ تعديل إيموجي",
-      `**السابق:** ${oldEmoji.name}\n` +
-      `**الجديد:** ${newEmoji.name}\n` +
-      `**بواسطة:** ${executor || "غير معروف"}`,
-      0xF1C40F
-    );
-  }
-);
-
-/* =========================================================
-   STICKERS
-========================================================= */
-
-client.on(
-  "stickerCreate",
-  async sticker => {
-
-    const executor =
-      await getAuditExecutor(
-        sticker.guild,
-        AuditLogEvent.StickerCreate,
-        sticker.id
-      );
-
-    await sendLog(
-      sticker.guild,
-      "sticker_create",
-      "🖼️ إضافة ستيكر",
-      `**الاسم:** ${sticker.name}\n` +
-      `**بواسطة:** ${executor || "غير معروف"}`,
-      0x2ECC71
-    );
-  }
-);
-
-client.on(
-  "stickerDelete",
-  async sticker => {
-
-    const executor =
-      await getAuditExecutor(
-        sticker.guild,
-        AuditLogEvent.StickerDelete,
-        sticker.id
-      );
-
-    await sendLog(
-      sticker.guild,
-      "sticker_delete",
-      "🗑️ حذف ستيكر",
-      `**الاسم:** ${sticker.name}\n` +
-      `**ID:** \`${sticker.id}\`\n` +
-      `**بواسطة:** ${executor || "غير معروف"}`,
-      0xE74C3C
-    );
-  }
-);
-
-client.on(
-  "stickerUpdate",
-  async (
-    oldSticker,
-    newSticker
-  ) => {
-
-    const executor =
-      await getAuditExecutor(
-        newSticker.guild,
-        AuditLogEvent.StickerUpdate,
-        newSticker.id
-      );
-
-    await sendLog(
-      newSticker.guild,
-      "sticker_update",
-      "✏️ تعديل ستيكر",
-      `**السابق:** ${oldSticker.name}\n` +
-      `**الجديد:** ${newSticker.name}\n` +
-      `**بواسطة:** ${executor || "غير معروف"}`,
-      0xF1C40F
-    );
-  }
-);
-
-/* =========================================================
-   REACTION ADD
-========================================================= */
-
-client.on(
-  "messageReactionAdd",
-  async (
-    reaction,
-    user
-  ) => {
-
-    if (
-      user.bot ||
-      !reaction.message.guild
-    ) {
-      return;
-    }
-
-    await sendLog(
-      reaction.message.guild,
-      "reaction_add",
-      "👍 إضافة رياكشن",
-      `**العضو:** ${user}\n` +
-      `**الرياكت:** ${reaction.emoji}\n` +
-      `**الروم:** ${reaction.message.channel}\n` +
-      `**الرسالة:** [اضغط هنا](${reaction.message.url})`,
-      0xF1C40F
-    );
-  }
-);
+});
 
 /* =========================================================
    ERRORS
 ========================================================= */
 
-client.on(
-  "error",
-  error => {
-    console.error(
-      "❌ Discord Error:",
-      error
-    );
-  }
-);
+client.on("error", error => {
+  console.error(
+    "DISCORD CLIENT ERROR:",
+    error
+  );
+});
 
-process.on(
-  "unhandledRejection",
-  error => {
-    console.error(
-      "❌ Unhandled Rejection:",
-      error
-    );
-  }
-);
+process.on("unhandledRejection", error => {
+  console.error(
+    "UNHANDLED REJECTION:",
+    error
+  );
+});
 
-process.on(
-  "uncaughtException",
-  error => {
-    console.error(
-      "❌ Uncaught Exception:",
-      error
-    );
-  }
-);
+process.on("uncaughtException", error => {
+  console.error(
+    "UNCAUGHT EXCEPTION:",
+    error
+  );
+});
 
 /* =========================================================
    LOGIN
 ========================================================= */
 
-console.log(
-  "🚀 Starting Discord Bot..."
-);
-
-client.login(TOKEN);
+(async () => {
+  try {
+    await setupDatabase();
+    await client.login(TOKEN);
+  } catch (error) {
+    console.error(
+      "❌ فشل تشغيل البوت:",
+      error
+    );
+    process.exit(1);
+  }
+})();
