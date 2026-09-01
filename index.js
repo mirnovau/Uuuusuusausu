@@ -1,10 +1,3 @@
-/* =========================================================
-   DISCORD ADMIN BOT - FULL VERSION
-   discord.js v14 + PostgreSQL
-   Owner / Developer:
-   1179433017064820747
-========================================================= */
-
 const {
   Client,
   GatewayIntentBits,
@@ -31,6 +24,11 @@ const CLIENT_ID = process.env.CLIENT_ID;
 const DATABASE_URL = process.env.DATABASE_URL;
 
 const OWNER_ID = "1179433017064820747";
+const GUILD_ID = "1523658452382126101";
+
+/* =========================================================
+   CHECK ENV
+========================================================= */
 
 if (!TOKEN) {
   console.error("❌ DISCORD_TOKEN غير موجود");
@@ -123,13 +121,12 @@ function defaultLogSettings() {
 }
 
 /* =========================================================
-   DATABASE SETUP + MIGRATION
+   DATABASE SETUP
 ========================================================= */
 
 async function setupDatabase() {
   console.log("🔄 فحص قاعدة البيانات...");
 
-  /* WARNS */
   await db.query(`
     CREATE TABLE IF NOT EXISTS warns (
       id SERIAL PRIMARY KEY,
@@ -141,7 +138,6 @@ async function setupDatabase() {
     )
   `);
 
-  /* AUTOREPLIES */
   await db.query(`
     CREATE TABLE IF NOT EXISTS autoreplies (
       id SERIAL PRIMARY KEY,
@@ -153,7 +149,6 @@ async function setupDatabase() {
     )
   `);
 
-  /* SHORTCUTS */
   await db.query(`
     CREATE TABLE IF NOT EXISTS shortcuts (
       id SERIAL PRIMARY KEY,
@@ -166,28 +161,31 @@ async function setupDatabase() {
   `);
 
   /* LOG CHANNELS */
+
   await db.query(`
     CREATE TABLE IF NOT EXISTS log_channels (
       guild_id TEXT PRIMARY KEY
     )
   `);
 
-  /* IMPORTANT:
-     إصلاح أي جدول قديم */
   await db.query(`
     ALTER TABLE log_channels
     ADD COLUMN IF NOT EXISTS channel_id TEXT
   `);
 
   /* LOG SETTINGS */
+
   await db.query(`
     CREATE TABLE IF NOT EXISTS log_settings (
       guild_id TEXT PRIMARY KEY
     )
   `);
 
-  /* IMPORTANT:
-     إضافة الأعمدة الناقصة تلقائياً */
+  /*
+     هذا هو الإصلاح لمشكلتك:
+     column "enabled" does not exist
+  */
+
   await db.query(`
     ALTER TABLE log_settings
     ADD COLUMN IF NOT EXISTS enabled BOOLEAN NOT NULL DEFAULT TRUE
@@ -198,7 +196,6 @@ async function setupDatabase() {
     ADD COLUMN IF NOT EXISTS settings JSONB NOT NULL DEFAULT '{}'::jsonb
   `);
 
-  /* BOT SESSIONS */
   await db.query(`
     CREATE TABLE IF NOT EXISTS bot_sessions (
       id SERIAL PRIMARY KEY,
@@ -207,7 +204,6 @@ async function setupDatabase() {
     )
   `);
 
-  /* إضافة جلسة جديدة */
   await db.query(`
     INSERT INTO bot_sessions (started_at)
     VALUES (NOW())
@@ -217,18 +213,22 @@ async function setupDatabase() {
 }
 
 /* =========================================================
-   LOG DATABASE HELPERS
+   LOG SETTINGS
 ========================================================= */
 
 async function ensureLogSettings(guildId) {
   await db.query(
     `
-    INSERT INTO log_settings (guild_id, enabled, settings)
+    INSERT INTO log_settings
+    (guild_id, enabled, settings)
     VALUES ($1, TRUE, $2::jsonb)
     ON CONFLICT (guild_id)
     DO NOTHING
     `,
-    [guildId, JSON.stringify(defaultLogSettings())]
+    [
+      guildId,
+      JSON.stringify(defaultLogSettings())
+    ]
   );
 }
 
@@ -257,7 +257,6 @@ async function getLogSettings(guildId) {
     settings = defaultLogSettings();
   }
 
-  /* إضافة أي نوع جديد إذا كان ناقصًا */
   for (const key of Object.keys(LOG_TYPES)) {
     if (typeof settings[key] !== "boolean") {
       settings[key] = true;
@@ -273,9 +272,7 @@ async function getLogSettings(guildId) {
 async function isLogEnabled(guildId, type) {
   const data = await getLogSettings(guildId);
 
-  if (!data.enabled) return false;
-
-  if (!Object.prototype.hasOwnProperty.call(data.settings, type)) {
+  if (!data.enabled) {
     return false;
   }
 
@@ -292,9 +289,9 @@ async function sendLog(guild, type, embed) {
 
     if (!LOG_TYPES[type]) return;
 
-    const enabled = await isLogEnabled(guild.id, type);
-
-    if (!enabled) return;
+    if (!(await isLogEnabled(guild.id, type))) {
+      return;
+    }
 
     const result = await db.query(
       `
@@ -305,11 +302,14 @@ async function sendLog(guild, type, embed) {
       [guild.id]
     );
 
-    if (!result.rows[0]?.channel_id) return;
+    const channelId =
+      result.rows[0]?.channel_id;
 
-    const channel = await guild.channels
-      .fetch(result.rows[0].channel_id)
-      .catch(() => null);
+    if (!channelId) return;
+
+    const channel =
+      await guild.channels.fetch(channelId)
+        .catch(() => null);
 
     if (!channel) return;
 
@@ -320,48 +320,30 @@ async function sendLog(guild, type, embed) {
     });
 
   } catch (error) {
-    console.error("❌ خطأ إرسال اللوق:", error.message);
+    console.error(
+      "❌ خطأ إرسال اللوق:",
+      error.message
+    );
   }
 }
 
 /* =========================================================
-   EMBED HELPERS
+   EMBED
 ========================================================= */
 
-function baseEmbed(title) {
+function logEmbed(title) {
   return new EmbedBuilder()
     .setTitle(title)
-    .setColor(0x5865f2)
+    .setColor(0xFFFFFF)
     .setTimestamp();
 }
 
 function userText(user) {
-  if (!user) return "غير معروف";
+  if (!user) {
+    return "غير معروف";
+  }
 
   return `${user} \`${user.id}\``;
-}
-
-/* =========================================================
-   AUDIT LOG HELPER
-========================================================= */
-
-async function getAuditExecutor(guild, type, targetId = null) {
-  try {
-    const logs = await guild.fetchAuditLogs({
-      type,
-      limit: 5
-    });
-
-    const entry = logs.entries.find(e => {
-      if (!targetId) return true;
-
-      return e.target?.id === targetId;
-    });
-
-    return entry?.executor || null;
-  } catch {
-    return null;
-  }
 }
 
 /* =========================================================
@@ -370,7 +352,6 @@ async function getAuditExecutor(guild, type, targetId = null) {
 
 const commands = [
 
-  /* BAN */
   new SlashCommandBuilder()
     .setName("ban")
     .setDescription("حظر عضو")
@@ -384,9 +365,10 @@ const commands = [
         .setDescription("السبب")
         .setRequired(false)
     )
-    .setDefaultMemberPermissions(PermissionFlagsBits.BanMembers),
+    .setDefaultMemberPermissions(
+      PermissionFlagsBits.BanMembers
+    ),
 
-  /* UNBAN */
   new SlashCommandBuilder()
     .setName("unban")
     .setDescription("إزالة حظر عضو")
@@ -395,9 +377,10 @@ const commands = [
         .setDescription("ID العضو")
         .setRequired(true)
     )
-    .setDefaultMemberPermissions(PermissionFlagsBits.BanMembers),
+    .setDefaultMemberPermissions(
+      PermissionFlagsBits.BanMembers
+    ),
 
-  /* KICK */
   new SlashCommandBuilder()
     .setName("kick")
     .setDescription("طرد عضو")
@@ -411,9 +394,10 @@ const commands = [
         .setDescription("السبب")
         .setRequired(false)
     )
-    .setDefaultMemberPermissions(PermissionFlagsBits.KickMembers),
+    .setDefaultMemberPermissions(
+      PermissionFlagsBits.KickMembers
+    ),
 
-  /* TIMEOUT */
   new SlashCommandBuilder()
     .setName("timeout")
     .setDescription("إعطاء تايم أوت")
@@ -434,9 +418,10 @@ const commands = [
         .setDescription("السبب")
         .setRequired(false)
     )
-    .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
+    .setDefaultMemberPermissions(
+      PermissionFlagsBits.ModerateMembers
+    ),
 
-  /* UNTIMEOUT */
   new SlashCommandBuilder()
     .setName("untimeout")
     .setDescription("إزالة التايم أوت")
@@ -445,9 +430,10 @@ const commands = [
         .setDescription("العضو")
         .setRequired(true)
     )
-    .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
+    .setDefaultMemberPermissions(
+      PermissionFlagsBits.ModerateMembers
+    ),
 
-  /* WARN */
   new SlashCommandBuilder()
     .setName("warn")
     .setDescription("تحذير عضو")
@@ -461,20 +447,22 @@ const commands = [
         .setDescription("السبب")
         .setRequired(true)
     )
-    .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
+    .setDefaultMemberPermissions(
+      PermissionFlagsBits.ModerateMembers
+    ),
 
-  /* WARNLIST */
   new SlashCommandBuilder()
     .setName("warnlist")
-    .setDescription("عرض تحذيرات عضو")
+    .setDescription("عرض التحذيرات")
     .addUserOption(o =>
       o.setName("member")
         .setDescription("العضو")
         .setRequired(false)
     )
-    .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
+    .setDefaultMemberPermissions(
+      PermissionFlagsBits.ModerateMembers
+    ),
 
-  /* CLEAR */
   new SlashCommandBuilder()
     .setName("clear")
     .setDescription("حذف رسائل")
@@ -485,21 +473,24 @@ const commands = [
         .setMinValue(1)
         .setMaxValue(100)
     )
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages),
+    .setDefaultMemberPermissions(
+      PermissionFlagsBits.ManageMessages
+    ),
 
-  /* LOCK */
   new SlashCommandBuilder()
     .setName("lock")
     .setDescription("قفل الروم")
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
+    .setDefaultMemberPermissions(
+      PermissionFlagsBits.ManageChannels
+    ),
 
-  /* UNLOCK */
   new SlashCommandBuilder()
     .setName("unlock")
     .setDescription("فتح الروم")
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
+    .setDefaultMemberPermissions(
+      PermissionFlagsBits.ManageChannels
+    ),
 
-  /* SLOWMODE */
   new SlashCommandBuilder()
     .setName("slowmode")
     .setDescription("تفعيل السلو مود")
@@ -510,34 +501,46 @@ const commands = [
         .setMinValue(0)
         .setMaxValue(21600)
     )
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
+    .setDefaultMemberPermissions(
+      PermissionFlagsBits.ManageChannels
+    ),
 
-  /* ROLE */
+  /* =====================================================
+     ROLE
+  ===================================================== */
+
   new SlashCommandBuilder()
     .setName("role")
-    .setDescription("إضافة أو إزالة رتبة")
+    .setDescription("إضافة أو إزالة رتبة من عضو")
     .addUserOption(o =>
       o.setName("member")
-        .setDescription("العضو")
+        .setDescription("اختر العضو")
         .setRequired(true)
     )
     .addRoleOption(o =>
       o.setName("role")
-        .setDescription("الرتبة")
+        .setDescription("اختر الرتبة")
         .setRequired(true)
     )
     .addStringOption(o =>
       o.setName("action")
-        .setDescription("العملية")
+        .setDescription("اختر الحالة")
         .setRequired(true)
         .addChoices(
-          { name: "إضافة", value: "add" },
-          { name: "إزالة", value: "remove" }
+          {
+            name: "➕ إضافة",
+            value: "add"
+          },
+          {
+            name: "➖ إزالة",
+            value: "remove"
+          }
         )
     )
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles),
+    .setDefaultMemberPermissions(
+      PermissionFlagsBits.ManageRoles
+    ),
 
-  /* NICKNAME */
   new SlashCommandBuilder()
     .setName("nickname")
     .setDescription("تغيير اسم عضو")
@@ -551,9 +554,10 @@ const commands = [
         .setDescription("الاسم الجديد")
         .setRequired(true)
     )
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageNicknames),
+    .setDefaultMemberPermissions(
+      PermissionFlagsBits.ManageNicknames
+    ),
 
-  /* INFO */
   new SlashCommandBuilder()
     .setName("info")
     .setDescription("معلومات عضو")
@@ -563,12 +567,10 @@ const commands = [
         .setRequired(false)
     ),
 
-  /* SERVERINFO */
   new SlashCommandBuilder()
     .setName("serverinfo")
     .setDescription("معلومات السيرفر"),
 
-  /* AVATAR */
   new SlashCommandBuilder()
     .setName("avatar")
     .setDescription("عرض صورة العضو")
@@ -578,7 +580,6 @@ const commands = [
         .setRequired(false)
     ),
 
-  /* BANNER */
   new SlashCommandBuilder()
     .setName("banner")
     .setDescription("عرض بانر العضو")
@@ -588,7 +589,6 @@ const commands = [
         .setRequired(false)
     ),
 
-  /* ROLES */
   new SlashCommandBuilder()
     .setName("roles")
     .setDescription("عرض رتب العضو")
@@ -598,13 +598,12 @@ const commands = [
         .setRequired(false)
     ),
 
-  /* AUTOREPLY */
   new SlashCommandBuilder()
     .setName("autoreply")
     .setDescription("إدارة الردود التلقائية")
     .addSubcommand(s =>
       s.setName("add")
-        .setDescription("إضافة رد تلقائي")
+        .setDescription("إضافة رد")
         .addStringOption(o =>
           o.setName("trigger")
             .setDescription("الكلمة")
@@ -618,30 +617,30 @@ const commands = [
     )
     .addSubcommand(s =>
       s.setName("remove")
-        .setDescription("حذف رد تلقائي")
+        .setDescription("حذف رد")
         .addStringOption(o =>
           o.setName("trigger")
             .setDescription("الكلمة")
             .setRequired(true)
         )
     )
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
+    .setDefaultMemberPermissions(
+      PermissionFlagsBits.ManageGuild
+    ),
 
-  /* LIST */
   new SlashCommandBuilder()
     .setName("list")
     .setDescription("عرض الردود التلقائية"),
 
-  /* SHORTCUT */
   new SlashCommandBuilder()
     .setName("shortcut")
     .setDescription("إدارة الاختصارات")
     .addSubcommand(s =>
       s.setName("set")
-        .setDescription("إنشاء اختصار")
+        .setDescription("إضافة اختصار")
         .addStringOption(o =>
           o.setName("name")
-            .setDescription("اسم الاختصار")
+            .setDescription("الاسم")
             .setRequired(true)
         )
         .addStringOption(o =>
@@ -655,7 +654,7 @@ const commands = [
         .setDescription("حذف اختصار")
         .addStringOption(o =>
           o.setName("name")
-            .setDescription("اسم الاختصار")
+            .setDescription("الاسم")
             .setRequired(true)
         )
     )
@@ -663,9 +662,14 @@ const commands = [
       s.setName("list")
         .setDescription("عرض الاختصارات")
     )
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
+    .setDefaultMemberPermissions(
+      PermissionFlagsBits.ManageGuild
+    ),
 
-  /* LOG */
+  /* =====================================================
+     LOG
+  ===================================================== */
+
   new SlashCommandBuilder()
     .setName("log")
     .setDescription("إدارة نظام اللوق")
@@ -689,20 +693,21 @@ const commands = [
       s.setName("edit")
         .setDescription("تعديل أنواع اللوق")
     )
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
+    .setDefaultMemberPermissions(
+      PermissionFlagsBits.ManageGuild
+    ),
 
-  /* LOGS */
   new SlashCommandBuilder()
     .setName("logs")
     .setDescription("اختبار اللوق")
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
+    .setDefaultMemberPermissions(
+      PermissionFlagsBits.ManageGuild
+    ),
 
-  /* BOT */
   new SlashCommandBuilder()
     .setName("bot")
     .setDescription("معلومات البوت"),
 
-  /* ME */
   new SlashCommandBuilder()
     .setName("me")
     .setDescription("من أنا؟")
@@ -713,14 +718,20 @@ const commands = [
 ========================================================= */
 
 async function registerCommands() {
-  const rest = new REST({ version: "10" }).setToken(TOKEN);
 
-  console.log("🔄 تسجيل أوامر البوت...");
+  const rest =
+    new REST({ version: "10" })
+      .setToken(TOKEN);
+
+  console.log("🔄 تسجيل الأوامر للسيرفر...");
 
   await rest.put(
-    Routes.applicationCommands(CLIENT_ID),
+    Routes.applicationGuildCommands(
+      CLIENT_ID,
+      GUILD_ID
+    ),
     {
-      body: commands.map(command => command.toJSON())
+      body: commands.map(c => c.toJSON())
     }
   );
 
@@ -731,17 +742,18 @@ async function registerCommands() {
    READY
 ========================================================= */
 
-client.once("ready", async () => {
-  console.log("=================================");
-  console.log(`✅ البوت يعمل: ${client.user.tag}`);
-  console.log(`🆔 ID: ${client.user.id}`);
+client.once("ready", () => {
+
+  console.log("================================");
+  console.log(`✅ البوت متصل: ${client.user.tag}`);
+  console.log(`🆔 ${client.user.id}`);
   console.log(`🏠 السيرفرات: ${client.guilds.cache.size}`);
-  console.log("=================================");
+  console.log("================================");
 
   client.user.setPresence({
     activities: [
       {
-        name: `/help | إدارة السيرفر`,
+        name: "/help | إدارة السيرفر",
         type: 3
       }
     ],
@@ -750,7 +762,7 @@ client.once("ready", async () => {
 });
 
 /* =========================================================
-   INTERACTION HANDLER
+   INTERACTIONS
 ========================================================= */
 
 client.on("interactionCreate", async interaction => {
@@ -758,7 +770,7 @@ client.on("interactionCreate", async interaction => {
   try {
 
     /* =====================================================
-       BUTTON / SELECT MENU
+       LOG SELECT MENU
     ===================================================== */
 
     if (interaction.isStringSelectMenu()) {
@@ -767,19 +779,27 @@ client.on("interactionCreate", async interaction => {
         return;
       }
 
-      if (!interaction.guild) return;
+      if (!interaction.guild) {
+        return;
+      }
+
+      const isOwner =
+        interaction.user.id === OWNER_ID;
 
       if (
-        interaction.user.id !== OWNER_ID &&
-        !interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)
+        !isOwner &&
+        !interaction.memberPermissions?.has(
+          PermissionFlagsBits.ManageGuild
+        )
       ) {
         return interaction.reply({
-          content: "❌ تحتاج صلاحية إدارة السيرفر.",
+          content: "❌ ما عندك صلاحية.",
           ephemeral: true
         });
       }
 
-      const type = interaction.values[0];
+      const type =
+        interaction.values[0];
 
       if (!LOG_TYPES[type]) {
         return interaction.reply({
@@ -788,9 +808,13 @@ client.on("interactionCreate", async interaction => {
         });
       }
 
-      const current = await getLogSettings(interaction.guildId);
+      const data =
+        await getLogSettings(
+          interaction.guildId
+        );
 
-      current.settings[type] = !current.settings[type];
+      data.settings[type] =
+        !data.settings[type];
 
       await db.query(
         `
@@ -799,25 +823,25 @@ client.on("interactionCreate", async interaction => {
         WHERE guild_id = $2
         `,
         [
-          JSON.stringify(current.settings),
+          JSON.stringify(data.settings),
           interaction.guildId
         ]
       );
 
-      const status = current.settings[type]
-        ? "🟢 مفعّل"
-        : "🔴 متوقف";
-
       return interaction.update({
         content:
-          `✅ تم تحديث **${LOG_TYPES[type]}**\n` +
-          `الحالة الآن: **${status}**`,
+          `✅ **${LOG_TYPES[type]}**\n\n` +
+          `الحالة الآن: ${
+            data.settings[type]
+              ? "🟢 مفعّل"
+              : "🔴 متوقف"
+          }`,
         components: []
       });
     }
 
     /* =====================================================
-       SLASH COMMANDS
+       COMMAND ONLY
     ===================================================== */
 
     if (!interaction.isChatInputCommand()) {
@@ -826,12 +850,14 @@ client.on("interactionCreate", async interaction => {
 
     if (!interaction.guild) {
       return interaction.reply({
-        content: "❌ هذا الأمر يعمل داخل السيرفر فقط.",
+        content:
+          "❌ هذا الأمر يعمل داخل السيرفر فقط.",
         ephemeral: true
       });
     }
 
-    const isOwner = interaction.user.id === OWNER_ID;
+    const isOwner =
+      interaction.user.id === OWNER_ID;
 
     /* =====================================================
        BAN
@@ -841,43 +867,50 @@ client.on("interactionCreate", async interaction => {
 
       if (
         !isOwner &&
-        !interaction.memberPermissions?.has(PermissionFlagsBits.BanMembers)
+        !interaction.memberPermissions?.has(
+          PermissionFlagsBits.BanMembers
+        )
       ) {
         return interaction.reply({
-          content: "❌ ما عندك صلاحية حظر الأعضاء.",
+          content: "❌ ما عندك صلاحية الحظر.",
           ephemeral: true
         });
       }
 
-      const user = interaction.options.getUser("member");
+      const user =
+        interaction.options.getUser("member");
+
       const reason =
-        interaction.options.getString("reason") || "بدون سبب";
+        interaction.options.getString("reason") ||
+        "بدون سبب";
 
-      const member = await interaction.guild.members
-        .fetch(user.id)
-        .catch(() => null);
-
-      if (member && !member.bannable && !isOwner) {
-        return interaction.reply({
-          content: "❌ لا أستطيع حظر هذا العضو.",
-          ephemeral: true
-        });
-      }
-
-      await interaction.guild.members.ban(user.id, {
-        reason
-      });
+      await interaction.guild.members.ban(
+        user.id,
+        { reason }
+      );
 
       await interaction.reply({
-        content: `🔨 تم حظر ${user}.\n**السبب:** ${reason}`
+        content:
+          `🔨 تم حظر ${user}\n` +
+          `**السبب:** ${reason}`
       });
 
-      const embed = baseEmbed("🔨 حظر عضو")
-        .addFields(
-          { name: "العضو", value: userText(user) },
-          { name: "المشرف", value: userText(interaction.user) },
-          { name: "السبب", value: reason }
-        );
+      const embed =
+        logEmbed("🔨 حظر عضو")
+          .addFields(
+            {
+              name: "العضو",
+              value: userText(user)
+            },
+            {
+              name: "الإداري",
+              value: userText(interaction.user)
+            },
+            {
+              name: "السبب",
+              value: reason
+            }
+          );
 
       await sendLog(
         interaction.guild,
@@ -896,27 +929,38 @@ client.on("interactionCreate", async interaction => {
 
       if (
         !isOwner &&
-        !interaction.memberPermissions?.has(PermissionFlagsBits.BanMembers)
+        !interaction.memberPermissions?.has(
+          PermissionFlagsBits.BanMembers
+        )
       ) {
         return interaction.reply({
-          content: "❌ ما عندك صلاحية إزالة الحظر.",
+          content: "❌ ما عندك صلاحية.",
           ephemeral: true
         });
       }
 
-      const id = interaction.options.getString("userid");
+      const id =
+        interaction.options.getString("userid");
 
       await interaction.guild.members.unban(id);
 
       await interaction.reply({
-        content: `✅ تم إزالة الحظر عن \`${id}\`.`
+        content:
+          `🔓 تم إزالة الحظر عن \`${id}\`.`
       });
 
-      const embed = baseEmbed("🔓 إزالة حظر")
-        .addFields(
-          { name: "العضو", value: `\`${id}\`` },
-          { name: "المشرف", value: userText(interaction.user) }
-        );
+      const embed =
+        logEmbed("🔓 إزالة حظر")
+          .addFields(
+            {
+              name: "العضو",
+              value: `\`${id}\``
+            },
+            {
+              name: "الإداري",
+              value: userText(interaction.user)
+            }
+          );
 
       await sendLog(
         interaction.guild,
@@ -935,41 +979,52 @@ client.on("interactionCreate", async interaction => {
 
       if (
         !isOwner &&
-        !interaction.memberPermissions?.has(PermissionFlagsBits.KickMembers)
+        !interaction.memberPermissions?.has(
+          PermissionFlagsBits.KickMembers
+        )
       ) {
         return interaction.reply({
-          content: "❌ ما عندك صلاحية طرد الأعضاء.",
+          content: "❌ ما عندك صلاحية الطرد.",
           ephemeral: true
         });
       }
 
-      const user = interaction.options.getUser("member");
+      const user =
+        interaction.options.getUser("member");
+
       const reason =
-        interaction.options.getString("reason") || "بدون سبب";
+        interaction.options.getString("reason") ||
+        "بدون سبب";
 
-      const member = await interaction.guild.members
-        .fetch(user.id)
-        .catch(() => null);
-
-      if (!member) {
-        return interaction.reply({
-          content: "❌ العضو غير موجود في السيرفر.",
-          ephemeral: true
-        });
-      }
+      const member =
+        await interaction.guild.members.fetch(
+          user.id
+        );
 
       await member.kick(reason);
 
       await interaction.reply({
-        content: `👢 تم طرد ${user}.\n**السبب:** ${reason}`
+        content:
+          `👢 تم طرد ${user}\n` +
+          `**السبب:** ${reason}`
       });
 
-      const embed = baseEmbed("👢 طرد عضو")
-        .addFields(
-          { name: "العضو", value: userText(user) },
-          { name: "المشرف", value: userText(interaction.user) },
-          { name: "السبب", value: reason }
-        );
+      const embed =
+        logEmbed("👢 طرد عضو")
+          .addFields(
+            {
+              name: "العضو",
+              value: userText(user)
+            },
+            {
+              name: "الإداري",
+              value: userText(interaction.user)
+            },
+            {
+              name: "السبب",
+              value: reason
+            }
+          );
 
       await sendLog(
         interaction.guild,
@@ -988,29 +1043,30 @@ client.on("interactionCreate", async interaction => {
 
       if (
         !isOwner &&
-        !interaction.memberPermissions?.has(PermissionFlagsBits.ModerateMembers)
+        !interaction.memberPermissions?.has(
+          PermissionFlagsBits.ModerateMembers
+        )
       ) {
         return interaction.reply({
-          content: "❌ ما عندك صلاحية التايم أوت.",
+          content: "❌ ما عندك صلاحية.",
           ephemeral: true
         });
       }
 
-      const user = interaction.options.getUser("member");
-      const minutes = interaction.options.getInteger("minutes");
+      const user =
+        interaction.options.getUser("member");
+
+      const minutes =
+        interaction.options.getInteger("minutes");
+
       const reason =
-        interaction.options.getString("reason") || "بدون سبب";
+        interaction.options.getString("reason") ||
+        "بدون سبب";
 
-      const member = await interaction.guild.members
-        .fetch(user.id)
-        .catch(() => null);
-
-      if (!member) {
-        return interaction.reply({
-          content: "❌ العضو غير موجود.",
-          ephemeral: true
-        });
-      }
+      const member =
+        await interaction.guild.members.fetch(
+          user.id
+        );
 
       await member.timeout(
         minutes * 60 * 1000,
@@ -1019,23 +1075,29 @@ client.on("interactionCreate", async interaction => {
 
       await interaction.reply({
         content:
-          `🔇 تم إعطاء ${user} تايم أوت لمدة **${minutes} دقيقة**.\n` +
-          `**السبب:** ${reason}`
+          `🔇 تم إعطاء ${user} تايم أوت لمدة **${minutes} دقيقة**.`
       });
 
-      const embed = baseEmbed("🔇 إضافة تايم أوت")
-        .addFields(
-          { name: "العضو", value: userText(user) },
-          { name: "المدة", value: `${minutes} دقيقة` },
-          { name: "المشرف", value: userText(interaction.user) },
-          { name: "السبب", value: reason }
-        );
-
-      await sendLog(
-        interaction.guild,
-        "timeout",
-        embed
-      );
+      const embed =
+        logEmbed("🔇 إضافة تايم أوت")
+          .addFields(
+            {
+              name: "العضو",
+              value: userText(user)
+            },
+            {
+              name: "المدة",
+              value: `${minutes} دقيقة`
+            },
+            {
+              name: "الإداري",
+              value: userText(interaction.user)
+            },
+            {
+              name: "السبب",
+              value: reason
+            }
+          );
 
       await sendLog(
         interaction.guild,
@@ -1054,38 +1116,43 @@ client.on("interactionCreate", async interaction => {
 
       if (
         !isOwner &&
-        !interaction.memberPermissions?.has(PermissionFlagsBits.ModerateMembers)
+        !interaction.memberPermissions?.has(
+          PermissionFlagsBits.ModerateMembers
+        )
       ) {
         return interaction.reply({
-          content: "❌ ما عندك صلاحية إزالة التايم أوت.",
+          content: "❌ ما عندك صلاحية.",
           ephemeral: true
         });
       }
 
-      const user = interaction.options.getUser("member");
+      const user =
+        interaction.options.getUser("member");
 
-      const member = await interaction.guild.members
-        .fetch(user.id)
-        .catch(() => null);
-
-      if (!member) {
-        return interaction.reply({
-          content: "❌ العضو غير موجود.",
-          ephemeral: true
-        });
-      }
+      const member =
+        await interaction.guild.members.fetch(
+          user.id
+        );
 
       await member.timeout(null);
 
       await interaction.reply({
-        content: `🔊 تم إزالة التايم أوت عن ${user}.`
+        content:
+          `🔊 تم إزالة التايم أوت عن ${user}.`
       });
 
-      const embed = baseEmbed("🔊 إزالة تايم أوت")
-        .addFields(
-          { name: "العضو", value: userText(user) },
-          { name: "المشرف", value: userText(interaction.user) }
-        );
+      const embed =
+        logEmbed("🔊 إزالة تايم أوت")
+          .addFields(
+            {
+              name: "العضو",
+              value: userText(user)
+            },
+            {
+              name: "الإداري",
+              value: userText(interaction.user)
+            }
+          );
 
       await sendLog(
         interaction.guild,
@@ -1104,16 +1171,21 @@ client.on("interactionCreate", async interaction => {
 
       if (
         !isOwner &&
-        !interaction.memberPermissions?.has(PermissionFlagsBits.ModerateMembers)
+        !interaction.memberPermissions?.has(
+          PermissionFlagsBits.ModerateMembers
+        )
       ) {
         return interaction.reply({
-          content: "❌ ما عندك صلاحية التحذير.",
+          content: "❌ ما عندك صلاحية.",
           ephemeral: true
         });
       }
 
-      const user = interaction.options.getUser("member");
-      const reason = interaction.options.getString("reason");
+      const user =
+        interaction.options.getUser("member");
+
+      const reason =
+        interaction.options.getString("reason");
 
       await db.query(
         `
@@ -1131,7 +1203,7 @@ client.on("interactionCreate", async interaction => {
 
       await interaction.reply({
         content:
-          `⚠️ تم تحذير ${user}.\n` +
+          `⚠️ تم تحذير ${user}\n` +
           `**السبب:** ${reason}`
       });
 
@@ -1146,10 +1218,12 @@ client.on("interactionCreate", async interaction => {
 
       if (
         !isOwner &&
-        !interaction.memberPermissions?.has(PermissionFlagsBits.ModerateMembers)
+        !interaction.memberPermissions?.has(
+          PermissionFlagsBits.ModerateMembers
+        )
       ) {
         return interaction.reply({
-          content: "❌ ما عندك صلاحية عرض التحذيرات.",
+          content: "❌ ما عندك صلاحية.",
           ephemeral: true
         });
       }
@@ -1185,9 +1259,7 @@ client.on("interactionCreate", async interaction => {
           ORDER BY created_at DESC
           LIMIT 50
           `,
-          [
-            interaction.guildId
-          ]
+          [interaction.guildId]
         );
       }
 
@@ -1198,19 +1270,22 @@ client.on("interactionCreate", async interaction => {
         });
       }
 
-      const lines = result.rows.map((row, i) => {
-        return (
-          `**${i + 1}.** <@${row.user_id}>\n` +
-          `السبب: ${row.reason || "بدون سبب"}\n` +
-          `المشرف: <@${row.moderator_id}>\n` +
-          `التاريخ: <t:${Math.floor(new Date(row.created_at).getTime() / 1000)}:R>`
-        );
-      });
+      const text =
+        result.rows.map((row, i) => {
+          return (
+            `**${i + 1}.** <@${row.user_id}>\n` +
+            `السبب: ${row.reason || "بدون سبب"}\n` +
+            `الإداري: <@${row.moderator_id}>\n` +
+            `التاريخ: <t:${Math.floor(
+              new Date(row.created_at).getTime() / 1000
+            )}:R>`
+          );
+        }).join("\n\n");
 
       return interaction.reply({
         embeds: [
-          baseEmbed("⚠️ سجل التحذيرات")
-            .setDescription(lines.join("\n\n"))
+          logEmbed("⚠️ سجل التحذيرات")
+            .setDescription(text)
         ],
         ephemeral: true
       });
@@ -1224,10 +1299,12 @@ client.on("interactionCreate", async interaction => {
 
       if (
         !isOwner &&
-        !interaction.memberPermissions?.has(PermissionFlagsBits.ManageMessages)
+        !interaction.memberPermissions?.has(
+          PermissionFlagsBits.ManageMessages
+        )
       ) {
         return interaction.reply({
-          content: "❌ ما عندك صلاحية حذف الرسائل.",
+          content: "❌ ما عندك صلاحية.",
           ephemeral: true
         });
       }
@@ -1242,25 +1319,27 @@ client.on("interactionCreate", async interaction => {
         );
 
       await interaction.reply({
-        content: `🧹 تم حذف **${messages.size}** رسالة.`,
+        content:
+          `🧹 تم حذف **${messages.size}** رسالة.`,
         ephemeral: true
       });
 
-      const embed = baseEmbed("🧹 حذف مجموعة رسائل")
-        .addFields(
-          {
-            name: "عدد الرسائل",
-            value: `${messages.size}`
-          },
-          {
-            name: "الروم",
-            value: `${interaction.channel}`
-          },
-          {
-            name: "المشرف",
-            value: userText(interaction.user)
-          }
-        );
+      const embed =
+        logEmbed("🧹 حذف مجموعة رسائل")
+          .addFields(
+            {
+              name: "العدد",
+              value: `${messages.size}`
+            },
+            {
+              name: "الروم",
+              value: `${interaction.channel}`
+            },
+            {
+              name: "الإداري",
+              value: userText(interaction.user)
+            }
+          );
 
       await sendLog(
         interaction.guild,
@@ -1279,7 +1358,9 @@ client.on("interactionCreate", async interaction => {
 
       if (
         !isOwner &&
-        !interaction.memberPermissions?.has(PermissionFlagsBits.ManageChannels)
+        !interaction.memberPermissions?.has(
+          PermissionFlagsBits.ManageChannels
+        )
       ) {
         return interaction.reply({
           content: "❌ ما عندك صلاحية.",
@@ -1309,7 +1390,9 @@ client.on("interactionCreate", async interaction => {
 
       if (
         !isOwner &&
-        !interaction.memberPermissions?.has(PermissionFlagsBits.ManageChannels)
+        !interaction.memberPermissions?.has(
+          PermissionFlagsBits.ManageChannels
+        )
       ) {
         return interaction.reply({
           content: "❌ ما عندك صلاحية.",
@@ -1339,7 +1422,9 @@ client.on("interactionCreate", async interaction => {
 
       if (
         !isOwner &&
-        !interaction.memberPermissions?.has(PermissionFlagsBits.ManageChannels)
+        !interaction.memberPermissions?.has(
+          PermissionFlagsBits.ManageChannels
+        )
       ) {
         return interaction.reply({
           content: "❌ ما عندك صلاحية.",
@@ -1358,7 +1443,7 @@ client.on("interactionCreate", async interaction => {
         content:
           seconds === 0
             ? "⚡ تم إيقاف السلو مود."
-            : `🐌 تم تفعيل السلو مود: **${seconds} ثانية**.`
+            : `🐌 السلو مود: **${seconds} ثانية**.`
       });
 
       return;
@@ -1372,10 +1457,13 @@ client.on("interactionCreate", async interaction => {
 
       if (
         !isOwner &&
-        !interaction.memberPermissions?.has(PermissionFlagsBits.ManageRoles)
+        !interaction.memberPermissions?.has(
+          PermissionFlagsBits.ManageRoles
+        )
       ) {
         return interaction.reply({
-          content: "❌ ما عندك صلاحية إدارة الرتب.",
+          content:
+            "❌ ما عندك صلاحية إدارة الرتب.",
           ephemeral: true
         });
       }
@@ -1389,32 +1477,120 @@ client.on("interactionCreate", async interaction => {
       const action =
         interaction.options.getString("action");
 
-      const member =
-        await interaction.guild.members.fetch(user.id);
-
-      if (action === "add") {
-        await member.roles.add(role);
-      } else {
-        await member.roles.remove(role);
+      if (!role) {
+        return interaction.reply({
+          content: "❌ الرتبة غير موجودة.",
+          ephemeral: true
+        });
       }
 
-      await interaction.reply({
-        content:
-          action === "add"
-            ? `✅ تمت إضافة ${role} إلى ${user}.`
-            : `✅ تمت إزالة ${role} من ${user}.`
-      });
+      if (role.managed) {
+        return interaction.reply({
+          content:
+            "❌ لا يمكن إدارة هذه الرتبة.",
+          ephemeral: true
+        });
+      }
 
-      const embed = baseEmbed("🎭 تحديث رتب عضو")
-        .addFields(
-          { name: "العضو", value: userText(user) },
-          { name: "الرتبة", value: `${role}` },
-          {
-            name: "العملية",
-            value: action === "add" ? "إضافة" : "إزالة"
-          },
-          { name: "المشرف", value: userText(interaction.user) }
+      const member =
+        await interaction.guild.members.fetch(
+          user.id
         );
+
+      const botMember =
+        await interaction.guild.members.fetchMe();
+
+      /* رتبة البوت */
+
+      if (
+        role.position >=
+        botMember.roles.highest.position
+      ) {
+        return interaction.reply({
+          content:
+            "❌ رتبة البوت أقل من هذه الرتبة.\n" +
+            "ارفع رتبة البوت فوق الرتبة المطلوبة.",
+          ephemeral: true
+        });
+      }
+
+      /* رتبة الإداري */
+
+      if (
+        !isOwner &&
+        role.position >=
+        interaction.member.roles.highest.position
+      ) {
+        return interaction.reply({
+          content:
+            "❌ لا تستطيع إدارة رتبة أعلى من أو مساوية لأعلى رتبة لديك.",
+          ephemeral: true
+        });
+      }
+
+      /* ADD */
+
+      if (action === "add") {
+
+        if (member.roles.cache.has(role.id)) {
+          return interaction.reply({
+            content:
+              `ℹ️ ${user} يملك ${role} بالفعل.`,
+            ephemeral: true
+          });
+        }
+
+        await member.roles.add(role);
+
+        await interaction.reply({
+          content:
+            `✅ تمت إضافة ${role} إلى ${user}.`
+        });
+      }
+
+      /* REMOVE */
+
+      if (action === "remove") {
+
+        if (!member.roles.cache.has(role.id)) {
+          return interaction.reply({
+            content:
+              `ℹ️ ${user} لا يملك ${role}.`,
+            ephemeral: true
+          });
+        }
+
+        await member.roles.remove(role);
+
+        await interaction.reply({
+          content:
+            `✅ تمت إزالة ${role} من ${user}.`
+        });
+      }
+
+      const embed =
+        logEmbed("🎭 تحديث رتبة عضو")
+          .addFields(
+            {
+              name: "العضو",
+              value: userText(user)
+            },
+            {
+              name: "الرول",
+              value: `${role} \`${role.id}\``
+            },
+            {
+              name: "الحالة",
+              value:
+                action === "add"
+                  ? "➕ إضافة"
+                  : "➖ إزالة"
+            },
+            {
+              name: "الإداري",
+              value: userText(interaction.user)
+            }
+          );
 
       await sendLog(
         interaction.guild,
@@ -1433,10 +1609,12 @@ client.on("interactionCreate", async interaction => {
 
       if (
         !isOwner &&
-        !interaction.memberPermissions?.has(PermissionFlagsBits.ManageNicknames)
+        !interaction.memberPermissions?.has(
+          PermissionFlagsBits.ManageNicknames
+        )
       ) {
         return interaction.reply({
-          content: "❌ ما عندك صلاحية تغيير الأسماء.",
+          content: "❌ ما عندك صلاحية.",
           ephemeral: true
         });
       }
@@ -1448,10 +1626,13 @@ client.on("interactionCreate", async interaction => {
         interaction.options.getString("name");
 
       const member =
-        await interaction.guild.members.fetch(user.id);
+        await interaction.guild.members.fetch(
+          user.id
+        );
 
       const oldName =
-        member.nickname || member.user.username;
+        member.nickname ||
+        member.user.username;
 
       await member.setNickname(name);
 
@@ -1460,13 +1641,26 @@ client.on("interactionCreate", async interaction => {
           `✅ تم تغيير اسم ${user} إلى **${name}**.`
       });
 
-      const embed = baseEmbed("✏️ تغيير اسم عضو")
-        .addFields(
-          { name: "العضو", value: userText(user) },
-          { name: "الاسم السابق", value: oldName },
-          { name: "الاسم الجديد", value: name },
-          { name: "المشرف", value: userText(interaction.user) }
-        );
+      const embed =
+        logEmbed("✏️ تغيير اسم عضو")
+          .addFields(
+            {
+              name: "العضو",
+              value: userText(user)
+            },
+            {
+              name: "الاسم السابق",
+              value: oldName
+            },
+            {
+              name: "الاسم الجديد",
+              value: name
+            },
+            {
+              name: "الإداري",
+              value: userText(interaction.user)
+            }
+          );
 
       await sendLog(
         interaction.guild,
@@ -1488,43 +1682,42 @@ client.on("interactionCreate", async interaction => {
         interaction.user;
 
       const member =
-        await interaction.guild.members.fetch(user.id)
+        await interaction.guild.members
+          .fetch(user.id)
           .catch(() => null);
 
-      const embed = baseEmbed("👤 معلومات العضو")
-        .setThumbnail(user.displayAvatarURL())
-        .addFields(
-          {
-            name: "الاسم",
-            value: user.username
-          },
-          {
-            name: "ID",
-            value: user.id
-          },
-          {
-            name: "البوت",
-            value: user.bot ? "نعم" : "لا"
-          }
-        );
+      const embed =
+        logEmbed("👤 معلومات العضو")
+          .setThumbnail(
+            user.displayAvatarURL()
+          )
+          .addFields(
+            {
+              name: "الاسم",
+              value: user.username
+            },
+            {
+              name: "ID",
+              value: user.id
+            },
+            {
+              name: "بوت",
+              value: user.bot ? "نعم" : "لا"
+            }
+          );
 
       if (member) {
-        embed.addFields(
-          {
-            name: "دخل السيرفر",
-            value: member.joinedTimestamp
-              ? `<t:${Math.floor(member.joinedTimestamp / 1000)}:R>`
-              : "غير معروف"
-          },
-          {
-            name: "الرتب",
-            value:
-              member.roles.cache
-                .filter(r => r.id !== interaction.guild.id)
-                .map(r => `${r}`)
-                .join(" ") || "لا توجد"
-          }
-        );
+        embed.addFields({
+          name: "الرتب",
+          value:
+            member.roles.cache
+              .filter(r =>
+                r.id !== interaction.guild.id
+              )
+              .map(r => `${r}`)
+              .join(" ") ||
+            "لا توجد"
+        });
       }
 
       return interaction.reply({
@@ -1538,36 +1731,36 @@ client.on("interactionCreate", async interaction => {
 
     if (interaction.commandName === "serverinfo") {
 
-      const guild = interaction.guild;
+      const guild =
+        interaction.guild;
 
-      const embed = baseEmbed("🏠 معلومات السيرفر")
-        .setThumbnail(guild.iconURL())
-        .addFields(
-          {
-            name: "اسم السيرفر",
-            value: guild.name
-          },
-          {
-            name: "ID",
-            value: guild.id
-          },
-          {
-            name: "الأعضاء",
-            value: `${guild.memberCount}`
-          },
-          {
-            name: "الرومات",
-            value: `${guild.channels.cache.size}`
-          },
-          {
-            name: "الرتب",
-            value: `${guild.roles.cache.size}`
-          },
-          {
-            name: "الإيموجيات",
-            value: `${guild.emojis.cache.size}`
-          }
-        );
+      const embed =
+        logEmbed("🏠 معلومات السيرفر")
+          .setThumbnail(
+            guild.iconURL()
+          )
+          .addFields(
+            {
+              name: "الاسم",
+              value: guild.name
+            },
+            {
+              name: "ID",
+              value: guild.id
+            },
+            {
+              name: "الأعضاء",
+              value: `${guild.memberCount}`
+            },
+            {
+              name: "الرومات",
+              value: `${guild.channels.cache.size}`
+            },
+            {
+              name: "الرتب",
+              value: `${guild.roles.cache.size}`
+            }
+          );
 
       return interaction.reply({
         embeds: [embed]
@@ -1584,22 +1777,17 @@ client.on("interactionCreate", async interaction => {
         interaction.options.getUser("member") ||
         interaction.user;
 
-      const embed = baseEmbed("🖼️ صورة العضو")
-        .setDescription(
-          `[فتح الصورة الأصلية](${user.displayAvatarURL({
-            size: 4096,
-            extension: "png"
-          })})`
-        )
-        .setImage(
-          user.displayAvatarURL({
-            size: 4096,
-            extension: "png"
-          })
-        );
+      const url =
+        user.displayAvatarURL({
+          size: 4096,
+          extension: "png"
+        });
 
       return interaction.reply({
-        embeds: [embed]
+        embeds: [
+          logEmbed("🖼️ صورة العضو")
+            .setImage(url)
+        ]
       });
     }
 
@@ -1614,28 +1802,29 @@ client.on("interactionCreate", async interaction => {
         interaction.user;
 
       const fullUser =
-        await client.users.fetch(user.id, {
-          force: true
-        });
+        await client.users.fetch(
+          user.id,
+          { force: true }
+        );
 
       if (!fullUser.banner) {
         return interaction.reply({
-          content: "❌ هذا العضو لا يملك بانر.",
+          content:
+            "❌ هذا العضو لا يملك بانر.",
           ephemeral: true
         });
       }
 
-      const banner =
-        fullUser.bannerURL({
-          size: 4096,
-          extension: "png"
-        });
-
-      const embed = baseEmbed("🎨 بانر العضو")
-        .setImage(banner);
-
       return interaction.reply({
-        embeds: [embed]
+        embeds: [
+          logEmbed("🎨 بانر العضو")
+            .setImage(
+              fullUser.bannerURL({
+                size: 4096,
+                extension: "png"
+              })
+            )
+        ]
       });
     }
 
@@ -1650,26 +1839,25 @@ client.on("interactionCreate", async interaction => {
         interaction.user;
 
       const member =
-        await interaction.guild.members.fetch(user.id)
-          .catch(() => null);
-
-      if (!member) {
-        return interaction.reply({
-          content: "❌ العضو غير موجود.",
-          ephemeral: true
-        });
-      }
+        await interaction.guild.members.fetch(
+          user.id
+        );
 
       const roles =
         member.roles.cache
-          .filter(r => r.id !== interaction.guild.id)
-          .sort((a, b) => b.position - a.position)
+          .filter(r =>
+            r.id !== interaction.guild.id
+          )
+          .sort(
+            (a, b) =>
+              b.position - a.position
+          )
           .map(r => `${r}`)
           .join(" ");
 
       return interaction.reply({
         embeds: [
-          baseEmbed("🎭 رتب العضو")
+          logEmbed("🎭 رتب العضو")
             .setDescription(
               roles || "لا توجد رتب."
             )
@@ -1685,7 +1873,9 @@ client.on("interactionCreate", async interaction => {
 
       if (
         !isOwner &&
-        !interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)
+        !interaction.memberPermissions?.has(
+          PermissionFlagsBits.ManageGuild
+        )
       ) {
         return interaction.reply({
           content: "❌ ما عندك صلاحية.",
@@ -1699,11 +1889,13 @@ client.on("interactionCreate", async interaction => {
       if (sub === "add") {
 
         const trigger =
-          interaction.options.getString("trigger")
+          interaction.options
+            .getString("trigger")
             .toLowerCase();
 
         const response =
-          interaction.options.getString("response");
+          interaction.options
+            .getString("response");
 
         await db.query(
           `
@@ -1722,16 +1914,16 @@ client.on("interactionCreate", async interaction => {
 
         return interaction.reply({
           content:
-            `✅ تم حفظ الرد التلقائي.\n` +
-            `الكلمة: **${trigger}**\n` +
-            `الرد: **${response}**`
+            `✅ تم حفظ الرد.\n` +
+            `**${trigger}** → ${response}`
         });
       }
 
       if (sub === "remove") {
 
         const trigger =
-          interaction.options.getString("trigger")
+          interaction.options
+            .getString("trigger")
             .toLowerCase();
 
         await db.query(
@@ -1748,7 +1940,7 @@ client.on("interactionCreate", async interaction => {
 
         return interaction.reply({
           content:
-            `🗑️ تم حذف الرد التلقائي: **${trigger}**`
+            `🗑️ تم حذف **${trigger}**.`
         });
       }
     }
@@ -1759,33 +1951,34 @@ client.on("interactionCreate", async interaction => {
 
     if (interaction.commandName === "list") {
 
-      const result = await db.query(
-        `
-        SELECT trigger, response
-        FROM autoreplies
-        WHERE guild_id = $1
-        ORDER BY trigger
-        `,
-        [interaction.guildId]
-      );
+      const result =
+        await db.query(
+          `
+          SELECT trigger, response
+          FROM autoreplies
+          WHERE guild_id = $1
+          ORDER BY trigger
+          `,
+          [interaction.guildId]
+        );
 
       if (!result.rows.length) {
         return interaction.reply({
-          content: "📭 لا توجد ردود تلقائية."
+          content:
+            "📭 لا توجد ردود تلقائية."
         });
       }
 
       const text =
         result.rows
-          .map(
-            x =>
-              `**${x.trigger}** → ${x.response}`
+          .map(x =>
+            `**${x.trigger}** → ${x.response}`
           )
           .join("\n");
 
       return interaction.reply({
         embeds: [
-          baseEmbed("🤖 الردود التلقائية")
+          logEmbed("🤖 الردود التلقائية")
             .setDescription(text)
         ]
       });
@@ -1799,7 +1992,9 @@ client.on("interactionCreate", async interaction => {
 
       if (
         !isOwner &&
-        !interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)
+        !interaction.memberPermissions?.has(
+          PermissionFlagsBits.ManageGuild
+        )
       ) {
         return interaction.reply({
           content: "❌ ما عندك صلاحية.",
@@ -1864,34 +2059,34 @@ client.on("interactionCreate", async interaction => {
 
       if (sub === "list") {
 
-        const result = await db.query(
-          `
-          SELECT name, response
-          FROM shortcuts
-          WHERE guild_id = $1
-          ORDER BY name
-          `,
-          [interaction.guildId]
-        );
+        const result =
+          await db.query(
+            `
+            SELECT name, response
+            FROM shortcuts
+            WHERE guild_id = $1
+            ORDER BY name
+            `,
+            [interaction.guildId]
+          );
 
         if (!result.rows.length) {
           return interaction.reply({
-            content: "📭 لا توجد اختصارات."
+            content:
+              "📭 لا توجد اختصارات."
           });
         }
 
-        const text =
-          result.rows
-            .map(
-              x =>
-                `**${x.name}** → ${x.response}`
-            )
-            .join("\n");
-
         return interaction.reply({
           embeds: [
-            baseEmbed("⚡ الاختصارات")
-              .setDescription(text)
+            logEmbed("⚡ الاختصارات")
+              .setDescription(
+                result.rows
+                  .map(x =>
+                    `**${x.name}** → ${x.response}`
+                  )
+                  .join("\n")
+              )
           ]
         });
       }
@@ -1908,10 +2103,12 @@ client.on("interactionCreate", async interaction => {
 
       if (
         !isOwner &&
-        !interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)
+        !interaction.memberPermissions?.has(
+          PermissionFlagsBits.ManageGuild
+        )
       ) {
         return interaction.reply({
-          content: "❌ ما عندك صلاحية إدارة اللوق.",
+          content: "❌ ما عندك صلاحية.",
           ephemeral: true
         });
       }
@@ -1919,15 +2116,6 @@ client.on("interactionCreate", async interaction => {
       const channel =
         interaction.channel;
 
-      if (!channel || !channel.isTextBased()) {
-        return interaction.reply({
-          content: "❌ هذا الروم غير صالح للوق.",
-          ephemeral: true
-        });
-      }
-
-      /* مهم جدًا:
-         جلب البوت نفسه بالطريقة الصحيحة */
       const me =
         await interaction.guild.members.fetchMe();
 
@@ -1935,13 +2123,19 @@ client.on("interactionCreate", async interaction => {
         channel.permissionsFor(me);
 
       if (
-        !permissions?.has(PermissionFlagsBits.ViewChannel) ||
-        !permissions?.has(PermissionFlagsBits.SendMessages) ||
-        !permissions?.has(PermissionFlagsBits.EmbedLinks)
+        !permissions?.has(
+          PermissionFlagsBits.ViewChannel
+        ) ||
+        !permissions?.has(
+          PermissionFlagsBits.SendMessages
+        ) ||
+        !permissions?.has(
+          PermissionFlagsBits.EmbedLinks
+        )
       ) {
         return interaction.reply({
           content:
-            "❌ البوت يحتاج صلاحيات:\n" +
+            "❌ البوت يحتاج:\n" +
             "• View Channel\n" +
             "• Send Messages\n" +
             "• Embed Links",
@@ -1967,17 +2161,15 @@ client.on("interactionCreate", async interaction => {
         interaction.guildId
       );
 
-      await interaction.reply({
+      return interaction.reply({
         embeds: [
-          baseEmbed("✅ تم إعداد اللوق")
+          logEmbed("✅ تم إعداد اللوق")
             .setDescription(
-              `روم اللوق الآن هو ${channel}\n\n` +
-              `جميع أنواع اللوق مفعلة بشكل افتراضي.`
+              `روم اللوق: ${channel}\n\n` +
+              "🟢 جميع اللوقات مفعلة."
             )
         ]
       });
-
-      return;
     }
 
     /* =====================================================
@@ -1991,7 +2183,9 @@ client.on("interactionCreate", async interaction => {
 
       if (
         !isOwner &&
-        !interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)
+        !interaction.memberPermissions?.has(
+          PermissionFlagsBits.ManageGuild
+        )
       ) {
         return interaction.reply({
           content: "❌ ما عندك صلاحية.",
@@ -2017,36 +2211,35 @@ client.on("interactionCreate", async interaction => {
       const channelId =
         channelResult.rows[0]?.channel_id;
 
-      const channel =
-        channelId
-          ? `<#${channelId}>`
-          : "❌ غير محدد";
-
-      const enabledCount =
+      const enabled =
         Object.values(data.settings)
-          .filter(Boolean)
-          .length;
+          .filter(Boolean).length;
 
       const total =
         Object.keys(LOG_TYPES).length;
 
-      const description =
-        `**حالة النظام:** ${
-          data.enabled ? "🟢 مفعّل" : "🔴 متوقف"
+      const text =
+        `**النظام:** ${
+          data.enabled
+            ? "🟢 مفعّل"
+            : "🔴 متوقف"
         }\n` +
-        `**روم اللوق:** ${channel}\n` +
-        `**اللوقات المفعلة:** ${enabledCount}/${total}\n\n` +
+        `**روم اللوق:** ${
+          channelId
+            ? `<#${channelId}>`
+            : "❌ غير محدد"
+        }\n` +
+        `**المفعّل:** ${enabled}/${total}\n\n` +
         Object.entries(LOG_TYPES)
-          .map(
-            ([key, name]) =>
-              `${data.settings[key] ? "🟢" : "🔴"} ${name}`
+          .map(([key, name]) =>
+            `${data.settings[key] ? "🟢" : "🔴"} ${name}`
           )
           .join("\n");
 
       return interaction.reply({
         embeds: [
-          baseEmbed("📋 حالة نظام اللوق")
-            .setDescription(description)
+          logEmbed("📋 حالة نظام اللوق")
+            .setDescription(text)
         ],
         ephemeral: true
       });
@@ -2063,7 +2256,9 @@ client.on("interactionCreate", async interaction => {
 
       if (
         !isOwner &&
-        !interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)
+        !interaction.memberPermissions?.has(
+          PermissionFlagsBits.ManageGuild
+        )
       ) {
         return interaction.reply({
           content: "❌ ما عندك صلاحية.",
@@ -2085,7 +2280,8 @@ client.on("interactionCreate", async interaction => {
       );
 
       return interaction.reply({
-        content: "🟢 تم تشغيل نظام اللوق بالكامل."
+        content:
+          "🟢 تم تشغيل نظام اللوق بالكامل."
       });
     }
 
@@ -2100,7 +2296,9 @@ client.on("interactionCreate", async interaction => {
 
       if (
         !isOwner &&
-        !interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)
+        !interaction.memberPermissions?.has(
+          PermissionFlagsBits.ManageGuild
+        )
       ) {
         return interaction.reply({
           content: "❌ ما عندك صلاحية.",
@@ -2122,7 +2320,8 @@ client.on("interactionCreate", async interaction => {
       );
 
       return interaction.reply({
-        content: "🔴 تم إيقاف نظام اللوق بالكامل."
+        content:
+          "🔴 تم إيقاف نظام اللوق بالكامل."
       });
     }
 
@@ -2137,17 +2336,15 @@ client.on("interactionCreate", async interaction => {
 
       if (
         !isOwner &&
-        !interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)
+        !interaction.memberPermissions?.has(
+          PermissionFlagsBits.ManageGuild
+        )
       ) {
         return interaction.reply({
           content: "❌ ما عندك صلاحية.",
           ephemeral: true
         });
       }
-
-      await ensureLogSettings(
-        interaction.guildId
-      );
 
       const data =
         await getLogSettings(
@@ -2160,12 +2357,15 @@ client.on("interactionCreate", async interaction => {
             `log_edit_${interaction.guildId}`
           )
           .setPlaceholder(
-            "اختر نوع اللوق لتشغيله أو إيقافه"
+            "اختر نوع اللوق"
           )
           .setMinValues(1)
           .setMaxValues(1);
 
-      for (const [key, name] of Object.entries(LOG_TYPES)) {
+      for (
+        const [key, name]
+        of Object.entries(LOG_TYPES)
+      ) {
 
         menu.addOptions(
           new StringSelectMenuOptionBuilder()
@@ -2185,22 +2385,23 @@ client.on("interactionCreate", async interaction => {
 
       return interaction.reply({
         content:
-          "⚙️ اختر نوع اللوق الذي تريد تغييره:\n" +
-          "عند الضغط عليه سيتم **تبديل حالته**.",
+          "⚙️ اختر نوع اللوق الذي تريد تشغيله أو إيقافه:",
         components: [row],
         ephemeral: true
       });
     }
 
     /* =====================================================
-       LOGS TEST
+       LOG TEST
     ===================================================== */
 
     if (interaction.commandName === "logs") {
 
       if (
         !isOwner &&
-        !interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)
+        !interaction.memberPermissions?.has(
+          PermissionFlagsBits.ManageGuild
+        )
       ) {
         return interaction.reply({
           content: "❌ ما عندك صلاحية.",
@@ -2208,20 +2409,15 @@ client.on("interactionCreate", async interaction => {
         });
       }
 
-      const embed = baseEmbed("🧪 اختبار اللوق")
-        .setDescription(
-          "إذا ظهر هذا الإمبد في روم اللوق، فالنظام يعمل بشكل صحيح."
-        )
-        .addFields(
-          {
-            name: "المشرف",
+      const embed =
+        logEmbed("🧪 اختبار اللوق")
+          .setDescription(
+            "إذا ظهر هذا الإمبد هنا، فنظام اللوق يعمل."
+          )
+          .addFields({
+            name: "الإداري",
             value: userText(interaction.user)
-          },
-          {
-            name: "السيرفر",
-            value: interaction.guild.name
-          }
-        );
+          });
 
       await sendLog(
         interaction.guild,
@@ -2231,7 +2427,7 @@ client.on("interactionCreate", async interaction => {
 
       return interaction.reply({
         content:
-          "✅ تم إرسال اختبار اللوق إلى روم اللوق."
+          "✅ تم إرسال اختبار اللوق."
       });
     }
 
@@ -2244,57 +2440,62 @@ client.on("interactionCreate", async interaction => {
       const uptime =
         client.uptime || 0;
 
-      const seconds =
+      const totalSeconds =
         Math.floor(uptime / 1000);
 
       const days =
-        Math.floor(seconds / 86400);
+        Math.floor(totalSeconds / 86400);
 
       const hours =
-        Math.floor((seconds % 86400) / 3600);
+        Math.floor(
+          (totalSeconds % 86400) / 3600
+        );
 
       const minutes =
-        Math.floor((seconds % 3600) / 60);
+        Math.floor(
+          (totalSeconds % 3600) / 60
+        );
 
-      const secs =
-        seconds % 60;
-
-      const embed =
-        baseEmbed("🤖 معلومات البوت")
-          .setThumbnail(
-            client.user.displayAvatarURL()
-          )
-          .addFields(
-            {
-              name: "الحالة",
-              value: "🟢 متصل"
-            },
-            {
-              name: "اسم البوت",
-              value: client.user.username
-            },
-            {
-              name: "ID",
-              value: client.user.id
-            },
-            {
-              name: "السيرفرات",
-              value: `${client.guilds.cache.size}`
-            },
-            {
-              name: "مدة الاتصال الحالية",
-              value:
-                `${days} يوم، ${hours} ساعة، ` +
-                `${minutes} دقيقة، ${secs} ثانية`
-            },
-            {
-              name: "Ping",
-              value: `${client.ws.ping}ms`
-            }
-          );
+      const seconds =
+        totalSeconds % 60;
 
       return interaction.reply({
-        embeds: [embed]
+        embeds: [
+          logEmbed("🤖 معلومات البوت")
+            .setThumbnail(
+              client.user.displayAvatarURL()
+            )
+            .addFields(
+              {
+                name: "الحالة",
+                value: "🟢 متصل"
+              },
+              {
+                name: "الاسم",
+                value: client.user.username
+              },
+              {
+                name: "ID",
+                value: client.user.id
+              },
+              {
+                name: "السيرفرات",
+                value:
+                  `${client.guilds.cache.size}`
+              },
+              {
+                name: "مدة التشغيل",
+                value:
+                  `${days} يوم ${hours} ساعة ` +
+                  `${minutes} دقيقة ${seconds} ثانية`
+              },
+              {
+                name: "Ping",
+                value:
+                  `${client.ws.ping}ms`
+              }
+            )
+        ]
       });
     }
 
@@ -2304,41 +2505,41 @@ client.on("interactionCreate", async interaction => {
 
     if (interaction.commandName === "me") {
 
-      const embed =
-        baseEmbed("🤖 مين أنا؟")
-          .setDescription(
-            "أنا بوت خاص لـ **.v5d.**\n\n" +
-            "ولدي سيرفر **Mr Nova**.\n\n" +
-            "مهمتي إدارة السيرفر، الحماية، " +
-            "اللوقات، والأوامر الإدارية."
-          );
-
       return interaction.reply({
-        embeds: [embed]
+        embeds: [
+          logEmbed("🤖 مين أنا؟")
+            .setDescription(
+              "أنا بوت خاص لـ **.v5d.**\n\n" +
+              "ولدي سيرفر **Mr Nova**.\n\n" +
+              "مهمتي إدارة السيرفر والحماية واللوقات."
+            )
+        ]
       });
     }
 
   } catch (error) {
 
-    console.error("=================================");
+    console.error("================================");
     console.error("❌ INTERACTION ERROR:");
     console.error(error);
-    console.error("=================================");
+    console.error("================================");
 
-    const message =
-      "❌ حدث خطأ أثناء تنفيذ الأمر.";
-
-    if (interaction.replied || interaction.deferred) {
+    if (
+      interaction.replied ||
+      interaction.deferred
+    ) {
 
       await interaction.followUp({
-        content: message,
+        content:
+          "❌ حدث خطأ أثناء تنفيذ الأمر.",
         ephemeral: true
       }).catch(() => {});
 
     } else {
 
       await interaction.reply({
-        content: message,
+        content:
+          "❌ حدث خطأ أثناء تنفيذ الأمر.",
         ephemeral: true
       }).catch(() => {});
     }
@@ -2352,7 +2553,7 @@ client.on("interactionCreate", async interaction => {
 client.on("guildMemberAdd", async member => {
 
   const embed =
-    baseEmbed("📥 إنضمام عضو")
+    logEmbed("📥 إنضمام عضو")
       .addFields(
         {
           name: "العضو",
@@ -2378,13 +2579,11 @@ client.on("guildMemberAdd", async member => {
 client.on("guildMemberRemove", async member => {
 
   const embed =
-    baseEmbed("📤 خروج عضو")
-      .addFields(
-        {
-          name: "العضو",
-          value: userText(member.user)
-        }
-      );
+    logEmbed("📤 خروج عضو")
+      .addFields({
+        name: "العضو",
+        value: userText(member.user)
+      });
 
   await sendLog(
     member.guild,
@@ -2397,894 +2596,978 @@ client.on("guildMemberRemove", async member => {
    MEMBER UPDATE
 ========================================================= */
 
-client.on("guildMemberUpdate", async (oldMember, newMember) => {
+client.on(
+  "guildMemberUpdate",
+  async (oldMember, newMember) => {
 
-  /* Roles */
-  const oldRoles =
-    oldMember.roles.cache.map(r => r.id);
+    const added =
+      newMember.roles.cache.filter(
+        r =>
+          !oldMember.roles.cache.has(r.id)
+      );
 
-  const newRoles =
-    newMember.roles.cache.map(r => r.id);
+    const removed =
+      oldMember.roles.cache.filter(
+        r =>
+          !newMember.roles.cache.has(r.id)
+      );
 
-  const added =
-    newMember.roles.cache.filter(
-      r => !oldMember.roles.cache.has(r.id)
-    );
+    if (added.size || removed.size) {
 
-  const removed =
-    oldMember.roles.cache.filter(
-      r => !newMember.roles.cache.has(r.id)
-    );
+      const embed =
+        logEmbed("🎭 تحديث رتب عضو")
+          .addFields(
+            {
+              name: "العضو",
+              value: userText(newMember.user)
+            },
+            {
+              name: "تمت الإضافة",
+              value:
+                added.map(r => `${r}`).join(" ") ||
+                "لا يوجد"
+            },
+            {
+              name: "تمت الإزالة",
+              value:
+                removed.map(r => `${r}`).join(" ") ||
+                "لا يوجد"
+            }
+          );
 
-  if (added.size || removed.size) {
+      await sendLog(
+        newMember.guild,
+        "member_roles",
+        embed
+      );
+    }
 
-    const embed =
-      baseEmbed("🎭 تحديث رتب عضو")
-        .addFields(
-          {
-            name: "العضو",
-            value: userText(newMember.user)
-          },
-          {
-            name: "تمت الإضافة",
-            value:
-              added.map(r => `${r}`).join(" ") ||
-              "لا يوجد"
-          },
-          {
-            name: "تمت الإزالة",
-            value:
-              removed.map(r => `${r}`).join(" ") ||
-              "لا يوجد"
-          }
-        );
+    const oldTimeout =
+      oldMember.communicationDisabledUntilTimestamp;
 
-    await sendLog(
-      newMember.guild,
-      "member_roles",
-      embed
-    );
+    const newTimeout =
+      newMember.communicationDisabledUntilTimestamp;
+
+    if (oldTimeout !== newTimeout) {
+
+      const embed =
+        logEmbed("🔇 تحديث التايم أوت")
+          .addFields(
+            {
+              name: "العضو",
+              value: userText(newMember.user)
+            },
+            {
+              name: "الحالة",
+              value:
+                newTimeout
+                  ? `🔴 حتى <t:${Math.floor(
+                      newTimeout / 1000
+                    )}:F>`
+                  : "🟢 تمت إزالة التايم أوت"
+            }
+          );
+
+      await sendLog(
+        newMember.guild,
+        "timeout_update",
+        embed
+      );
+    }
   }
-
-  /* Timeout */
-  const oldTimeout =
-    oldMember.communicationDisabledUntilTimestamp;
-
-  const newTimeout =
-    newMember.communicationDisabledUntilTimestamp;
-
-  if (oldTimeout !== newTimeout) {
-
-    const embed =
-      baseEmbed("🔇 تحديث التايم أوت")
-        .addFields(
-          {
-            name: "العضو",
-            value: userText(newMember.user)
-          },
-          {
-            name: "الحالة",
-            value:
-              newTimeout
-                ? `🔴 حتى <t:${Math.floor(newTimeout / 1000)}:F>`
-                : "🟢 تمت إزالة التايم أوت"
-          }
-        );
-
-    await sendLog(
-      newMember.guild,
-      "timeout_update",
-      embed
-    );
-
-    await sendLog(
-      newMember.guild,
-      "timeout",
-      embed
-    );
-  }
-
-  /* Nickname */
-  if (oldMember.nickname !== newMember.nickname) {
-
-    const embed =
-      baseEmbed("✏️ تغيير اسم عضو")
-        .addFields(
-          {
-            name: "العضو",
-            value: userText(newMember.user)
-          },
-          {
-            name: "الاسم السابق",
-            value:
-              oldMember.nickname ||
-              oldMember.user.username
-          },
-          {
-            name: "الاسم الجديد",
-            value:
-              newMember.nickname ||
-              newMember.user.username
-          }
-        );
-
-    await sendLog(
-      newMember.guild,
-      "member_roles",
-      embed
-    );
-  }
-});
+);
 
 /* =========================================================
-   VOICE STATE UPDATE
+   VOICE
 ========================================================= */
 
-client.on("voiceStateUpdate", async (oldState, newState) => {
-
-  const guild =
-    newState.guild || oldState.guild;
-
-  const member =
-    newState.member || oldState.member;
-
-  if (!member) return;
-
-  /* Join */
-  if (!oldState.channelId && newState.channelId) {
-
-    const embed =
-      baseEmbed("🔊 دخول صوتي")
-        .addFields(
-          {
-            name: "العضو",
-            value: userText(member.user)
-          },
-          {
-            name: "الروم",
-            value: `${newState.channel}`
-          }
-        );
-
-    await sendLog(
-      guild,
-      "voice",
-      embed
-    );
-
-    return;
-  }
-
-  /* Leave */
-  if (oldState.channelId && !newState.channelId) {
-
-    const embed =
-      baseEmbed("🔇 خروج صوتي")
-        .addFields(
-          {
-            name: "العضو",
-            value: userText(member.user)
-          },
-          {
-            name: "الروم السابق",
-            value: `${oldState.channel}`
-          }
-        );
-
-    await sendLog(
-      guild,
-      "voice",
-      embed
-    );
-
-    return;
-  }
-
-  /* Move */
-  if (
-    oldState.channelId &&
-    newState.channelId &&
-    oldState.channelId !== newState.channelId
-  ) {
-
-    const embed =
-      baseEmbed("🔀 تنقل صوتي")
-        .addFields(
-          {
-            name: "العضو",
-            value: userText(member.user)
-          },
-          {
-            name: "من",
-            value: `${oldState.channel}`
-          },
-          {
-            name: "إلى",
-            value: `${newState.channel}`
-          }
-        );
-
-    await sendLog(
-      guild,
-      "voice_move",
-      embed
-    );
-
-    return;
-  }
-
-  /* Server mute */
-  if (
-    oldState.serverMute !== newState.serverMute ||
-    oldState.serverDeaf !== newState.serverDeaf
-  ) {
-
-    const embed =
-      baseEmbed("🎙️ تحديث صلاحيات الصوت")
-        .addFields(
-          {
-            name: "العضو",
-            value: userText(member.user)
-          },
-          {
-            name: "Server Mute",
-            value:
-              newState.serverMute
-                ? "🔴 ممنوع من التحدث"
-                : "🟢 مسموح بالتحدث"
-          },
-          {
-            name: "Server Deaf",
-            value:
-              newState.serverDeaf
-                ? "🔴 ممنوع من الإستماع"
-                : "🟢 مسموح بالإستماع"
-          }
-        );
-
-    await sendLog(
-      guild,
-      "voice_permissions",
-      embed
-    );
-  }
-});
-
-/* =========================================================
-   CHANNEL CREATE
-========================================================= */
-
-client.on("channelCreate", async channel => {
-
-  if (!channel.guild) return;
-
-  const embed =
-    baseEmbed("📁 إنشاء روم")
-      .addFields(
-        {
-          name: "الروم",
-          value: `${channel}`
-        },
-        {
-          name: "الاسم",
-          value: channel.name
-        },
-        {
-          name: "النوع",
-          value: channel.type.toString()
-        }
-      );
-
-  await sendLog(
-    channel.guild,
-    "channel_create_delete",
-    embed
-  );
-});
-
-/* =========================================================
-   CHANNEL DELETE
-========================================================= */
-
-client.on("channelDelete", async channel => {
-
-  if (!channel.guild) return;
-
-  const embed =
-    baseEmbed("🗑️ حذف روم")
-      .addFields(
-        {
-          name: "الاسم",
-          value: channel.name
-        },
-        {
-          name: "ID",
-          value: channel.id
-        }
-      );
-
-  await sendLog(
-    channel.guild,
-    "channel_create_delete",
-    embed
-  );
-});
-
-/* =========================================================
-   CHANNEL UPDATE
-========================================================= */
-
-client.on("channelUpdate", async (oldChannel, newChannel) => {
-
-  if (!newChannel.guild) return;
-
-  if (
-    oldChannel.name !== newChannel.name ||
-    oldChannel.topic !== newChannel.topic ||
-    oldChannel.parentId !== newChannel.parentId ||
-    oldChannel.rateLimitPerUser !== newChannel.rateLimitPerUser
-  ) {
-
-    const embed =
-      baseEmbed("✏️ تحديث روم")
-        .addFields(
-          {
-            name: "الروم",
-            value: `${newChannel}`
-          },
-          {
-            name: "الاسم السابق",
-            value: oldChannel.name
-          },
-          {
-            name: "الاسم الجديد",
-            value: newChannel.name
-          }
-        );
-
-    await sendLog(
-      newChannel.guild,
-      "channel_update",
-      embed
-    );
-  }
-
-  if (
-    oldChannel.permissionOverwrites.cache.size !==
-    newChannel.permissionOverwrites.cache.size
-  ) {
-
-    const embed =
-      baseEmbed("🔐 تحديث صلاحيات روم")
-        .addFields(
-          {
-            name: "الروم",
-            value: `${newChannel}`
-          }
-        );
-
-    await sendLog(
-      newChannel.guild,
-      "channel_permissions",
-      embed
-    );
-  }
-});
-
-/* =========================================================
-   ROLE CREATE
-========================================================= */
-
-client.on("roleCreate", async role => {
-
-  const embed =
-    baseEmbed("🎭 إنشاء رتبة")
-      .addFields(
-        {
-          name: "الرتبة",
-          value: `${role}`
-        },
-        {
-          name: "الاسم",
-          value: role.name
-        },
-        {
-          name: "ID",
-          value: role.id
-        }
-      );
-
-  await sendLog(
-    role.guild,
-    "role_create_delete",
-    embed
-  );
-});
-
-/* =========================================================
-   ROLE DELETE
-========================================================= */
-
-client.on("roleDelete", async role => {
-
-  const embed =
-    baseEmbed("🗑️ حذف رتبة")
-      .addFields(
-        {
-          name: "الاسم",
-          value: role.name
-        },
-        {
-          name: "ID",
-          value: role.id
-        }
-      );
-
-  await sendLog(
-    role.guild,
-    "role_create_delete",
-    embed
-  );
-});
-
-/* =========================================================
-   ROLE UPDATE
-========================================================= */
-
-client.on("roleUpdate", async (oldRole, newRole) => {
-
-  if (
-    oldRole.name !== newRole.name ||
-    oldRole.color !== newRole.color ||
-    oldRole.hoist !== newRole.hoist ||
-    oldRole.mentionable !== newRole.mentionable
-  ) {
-
-    const embed =
-      baseEmbed("✏️ تحديث رتبة")
-        .addFields(
-          {
-            name: "الرتبة",
-            value: `${newRole}`
-          },
-          {
-            name: "الاسم السابق",
-            value: oldRole.name
-          },
-          {
-            name: "الاسم الجديد",
-            value: newRole.name
-          }
-        );
-
-    await sendLog(
-      newRole.guild,
-      "role_update",
-      embed
-    );
-  }
-
-  if (
-    oldRole.permissions.bitfield !==
-    newRole.permissions.bitfield
-  ) {
-
-    const embed =
-      baseEmbed("🔐 تحديث صلاحيات رتبة")
-        .addFields(
-          {
-            name: "الرتبة",
-            value: `${newRole}`
-          },
-          {
-            name: "الاسم",
-            value: newRole.name
-          }
-        );
-
-    await sendLog(
-      newRole.guild,
-      "role_permissions",
-      embed
-    );
-  }
-});
-
-/* =========================================================
-   GUILD UPDATE
-========================================================= */
-
-client.on("guildUpdate", async (oldGuild, newGuild) => {
-
-  if (
-    oldGuild.name !== newGuild.name ||
-    oldGuild.icon !== newGuild.icon ||
-    oldGuild.banner !== newGuild.banner ||
-    oldGuild.description !== newGuild.description ||
-    oldGuild.verificationLevel !== newGuild.verificationLevel
-  ) {
-
-    const embed =
-      baseEmbed("⚙️ تحديث إعدادات السيرفر")
-        .addFields(
-          {
-            name: "السيرفر",
-            value: newGuild.name
-          },
-          {
-            name: "الاسم السابق",
-            value: oldGuild.name
-          },
-          {
-            name: "الاسم الجديد",
-            value: newGuild.name
-          }
-        );
-
-    await sendLog(
-      newGuild,
-      "guild_update",
-      embed
-    );
-  }
-});
-
-/* =========================================================
-   MESSAGE DELETE
-========================================================= */
-
-client.on("messageDelete", async message => {
-
-  if (!message.guild) return;
-
-  if (message.author?.bot) return;
-
-  const embed =
-    baseEmbed("🗑️ حذف رسالة")
-      .addFields(
-        {
-          name: "العضو",
-          value: message.author
-            ? userText(message.author)
-            : "غير معروف"
-        },
-        {
-          name: "الروم",
-          value: `${message.channel}`
-        },
-        {
-          name: "المحتوى",
-          value:
-            message.content
-              ? message.content.slice(0, 1000)
-              : "لا يوجد محتوى محفوظ"
-        }
-      );
-
-  await sendLog(
-    message.guild,
-    "message_delete",
-    embed
-  );
-});
-
-/* =========================================================
-   MESSAGE BULK DELETE
-========================================================= */
-
-client.on("messageDeleteBulk", async messages => {
-
-  const first =
-    messages.first();
-
-  if (!first?.guild) return;
-
-  const embed =
-    baseEmbed("🧹 حذف مجموعة رسائل")
-      .addFields(
-        {
-          name: "عدد الرسائل",
-          value: `${messages.size}`
-        },
-        {
-          name: "الروم",
-          value: `${first.channel}`
-        }
-      );
-
-  await sendLog(
-    first.guild,
-    "bulk_delete",
-    embed
-  );
-});
-
-/* =========================================================
-   REACTION ADD
-========================================================= */
-
-client.on("messageReactionAdd", async (reaction, user) => {
-
-  if (user.bot) return;
-
-  if (!reaction.message.guild) return;
-
-  const embed =
-    baseEmbed("😀 إضافة رياكشن")
-      .addFields(
-        {
-          name: "العضو",
-          value: userText(user)
-        },
-        {
-          name: "الرياكشن",
-          value: reaction.emoji.toString()
-        },
-        {
-          name: "الروم",
-          value: `${reaction.message.channel}`
-        }
-      );
-
-  await sendLog(
-    reaction.message.guild,
-    "reaction",
-    embed
-  );
-});
-
-/* =========================================================
-   EMOJI CREATE
-========================================================= */
-
-client.on("emojiCreate", async emoji => {
-
-  const embed =
-    baseEmbed("😀 إضافة إيموجي")
-      .addFields(
-        {
-          name: "الإيموجي",
-          value: `${emoji}`
-        },
-        {
-          name: "الاسم",
-          value: emoji.name || "غير معروف"
-        },
-        {
-          name: "ID",
-          value: emoji.id
-        }
-      );
-
-  await sendLog(
-    emoji.guild,
-    "emoji",
-    embed
-  );
-});
-
-/* =========================================================
-   EMOJI DELETE
-========================================================= */
-
-client.on("emojiDelete", async emoji => {
-
-  const embed =
-    baseEmbed("🗑️ حذف إيموجي")
-      .addFields(
-        {
-          name: "الاسم",
-          value: emoji.name || "غير معروف"
-        },
-        {
-          name: "ID",
-          value: emoji.id
-        }
-      );
-
-  await sendLog(
-    emoji.guild,
-    "emoji",
-    embed
-  );
-});
-
-/* =========================================================
-   EMOJI UPDATE
-========================================================= */
-
-client.on("emojiUpdate", async (oldEmoji, newEmoji) => {
-
-  const embed =
-    baseEmbed("✏️ تحديث إيموجي")
-      .addFields(
-        {
-          name: "الإيموجي",
-          value: `${newEmoji}`
-        },
-        {
-          name: "الاسم السابق",
-          value: oldEmoji.name || "غير معروف"
-        },
-        {
-          name: "الاسم الجديد",
-          value: newEmoji.name || "غير معروف"
-        }
-      );
-
-  await sendLog(
-    newEmoji.guild,
-    "emoji",
-    embed
-  );
-});
-
-/* =========================================================
-   STICKER CREATE
-========================================================= */
-
-client.on("stickerCreate", async sticker => {
-
-  const embed =
-    baseEmbed("🏷️ إضافة ستيكر")
-      .addFields(
-        {
-          name: "الاسم",
-          value: sticker.name
-        },
-        {
-          name: "ID",
-          value: sticker.id
-        }
-      );
-
-  await sendLog(
-    sticker.guild,
-    "sticker",
-    embed
-  );
-});
-
-/* =========================================================
-   STICKER DELETE
-========================================================= */
-
-client.on("stickerDelete", async sticker => {
-
-  const embed =
-    baseEmbed("🗑️ حذف ستيكر")
-      .addFields(
-        {
-          name: "الاسم",
-          value: sticker.name
-        },
-        {
-          name: "ID",
-          value: sticker.id
-        }
-      );
-
-  await sendLog(
-    sticker.guild,
-    "sticker",
-    embed
-  );
-});
-
-/* =========================================================
-   STICKER UPDATE
-========================================================= */
-
-client.on("stickerUpdate", async (oldSticker, newSticker) => {
-
-  const embed =
-    baseEmbed("✏️ تحديث ستيكر")
-      .addFields(
-        {
-          name: "الاسم السابق",
-          value: oldSticker.name
-        },
-        {
-          name: "الاسم الجديد",
-          value: newSticker.name
-        },
-        {
-          name: "ID",
-          value: newSticker.id
-        }
-      );
-
-  await sendLog(
-    newSticker.guild,
-    "sticker",
-    embed
-  );
-});
-
-/* =========================================================
-   AUTO REPLIES + SHORTCUTS
-========================================================= */
-
-client.on("messageCreate", async message => {
-
-  if (!message.guild) return;
-  if (message.author.bot) return;
-
-  try {
-
-    const content =
-      message.content.trim().toLowerCase();
-
-    /* AUTO REPLY */
-
-    const auto =
-      await db.query(
-        `
-        SELECT response
-        FROM autoreplies
-        WHERE guild_id = $1
-        AND trigger = $2
-        LIMIT 1
-        `,
-        [
-          message.guild.id,
-          content
-        ]
-      );
-
-    if (auto.rows[0]) {
-
-      await message.reply(
-        auto.rows[0].response
+client.on(
+  "voiceStateUpdate",
+  async (oldState, newState) => {
+
+    const guild =
+      newState.guild || oldState.guild;
+
+    const member =
+      newState.member || oldState.member;
+
+    if (!member) return;
+
+    if (
+      !oldState.channelId &&
+      newState.channelId
+    ) {
+
+      const embed =
+        logEmbed("🔊 دخول صوتي")
+          .addFields(
+            {
+              name: "العضو",
+              value: userText(member.user)
+            },
+            {
+              name: "الروم",
+              value: `${newState.channel}`
+            }
+          );
+
+      await sendLog(
+        guild,
+        "voice",
+        embed
       );
 
       return;
     }
 
-    /* SHORTCUT */
+    if (
+      oldState.channelId &&
+      !newState.channelId
+    ) {
 
-    const shortcut =
-      await db.query(
-        `
-        SELECT response
-        FROM shortcuts
-        WHERE guild_id = $1
-        AND name = $2
-        LIMIT 1
-        `,
-        [
-          message.guild.id,
-          content
-        ]
+      const embed =
+        logEmbed("🔇 خروج صوتي")
+          .addFields(
+            {
+              name: "العضو",
+              value: userText(member.user)
+            },
+            {
+              name: "الروم",
+              value: `${oldState.channel}`
+            }
+          );
+
+      await sendLog(
+        guild,
+        "voice",
+        embed
       );
 
-    if (shortcut.rows[0]) {
+      return;
+    }
 
-      await message.reply(
-        shortcut.rows[0].response
+    if (
+      oldState.channelId &&
+      newState.channelId &&
+      oldState.channelId !==
+        newState.channelId
+    ) {
+
+      const embed =
+        logEmbed("🔀 تنقل صوتي")
+          .addFields(
+            {
+              name: "العضو",
+              value: userText(member.user)
+            },
+            {
+              name: "من",
+              value: `${oldState.channel}`
+            },
+            {
+              name: "إلى",
+              value: `${newState.channel}`
+            }
+          );
+
+      await sendLog(
+        guild,
+        "voice_move",
+        embed
+      );
+
+      return;
+    }
+
+    if (
+      oldState.serverMute !==
+        newState.serverMute ||
+      oldState.serverDeaf !==
+        newState.serverDeaf
+    ) {
+
+      const embed =
+        logEmbed("🎙️ تحديث صلاحيات الصوت")
+          .addFields(
+            {
+              name: "العضو",
+              value: userText(member.user)
+            },
+            {
+              name: "التحدث",
+              value:
+                newState.serverMute
+                  ? "🔴 ممنوع"
+                  : "🟢 مسموح"
+            },
+            {
+              name: "الإستماع",
+              value:
+                newState.serverDeaf
+                  ? "🔴 ممنوع"
+                  : "🟢 مسموح"
+            }
+          );
+
+      await sendLog(
+        guild,
+        "voice_permissions",
+        embed
+      );
+    }
+  }
+);
+
+/* =========================================================
+   CHANNEL CREATE
+========================================================= */
+
+client.on(
+  "channelCreate",
+  async channel => {
+
+    if (!channel.guild) return;
+
+    const embed =
+      logEmbed("📁 إنشاء روم")
+        .addFields(
+          {
+            name: "الروم",
+            value: `${channel}`
+          },
+          {
+            name: "الاسم",
+            value: channel.name
+          }
+        );
+
+    await sendLog(
+      channel.guild,
+      "channel_create_delete",
+      embed
+    );
+  }
+);
+
+/* =========================================================
+   CHANNEL DELETE
+========================================================= */
+
+client.on(
+  "channelDelete",
+  async channel => {
+
+    if (!channel.guild) return;
+
+    const embed =
+      logEmbed("🗑️ حذف روم")
+        .addFields(
+          {
+            name: "الاسم",
+            value: channel.name
+          },
+          {
+            name: "ID",
+            value: channel.id
+          }
+        );
+
+    await sendLog(
+      channel.guild,
+      "channel_create_delete",
+      embed
+    );
+  }
+);
+
+/* =========================================================
+   CHANNEL UPDATE
+========================================================= */
+
+client.on(
+  "channelUpdate",
+  async (oldChannel, newChannel) => {
+
+    if (!newChannel.guild) return;
+
+    if (
+      oldChannel.name !==
+        newChannel.name ||
+      oldChannel.topic !==
+        newChannel.topic ||
+      oldChannel.parentId !==
+        newChannel.parentId ||
+      oldChannel.rateLimitPerUser !==
+        newChannel.rateLimitPerUser
+    ) {
+
+      const embed =
+        logEmbed("✏️ تحديث روم")
+          .addFields(
+            {
+              name: "الروم",
+              value: `${newChannel}`
+            },
+            {
+              name: "الاسم السابق",
+              value: oldChannel.name
+            },
+            {
+              name: "الاسم الجديد",
+              value: newChannel.name
+            }
+          );
+
+      await sendLog(
+        newChannel.guild,
+        "channel_update",
+        embed
+      );
+    }
+  }
+);
+
+/* =========================================================
+   ROLE CREATE
+========================================================= */
+
+client.on(
+  "roleCreate",
+  async role => {
+
+    const embed =
+      logEmbed("🎭 إنشاء رتبة")
+        .addFields(
+          {
+            name: "الرتبة",
+            value: `${role}`
+          },
+          {
+            name: "الاسم",
+            value: role.name
+          }
+        );
+
+    await sendLog(
+      role.guild,
+      "role_create_delete",
+      embed
+    );
+  }
+);
+
+/* =========================================================
+   ROLE DELETE
+========================================================= */
+
+client.on(
+  "roleDelete",
+  async role => {
+
+    const embed =
+      logEmbed("🗑️ حذف رتبة")
+        .addFields(
+          {
+            name: "الاسم",
+            value: role.name
+          },
+          {
+            name: "ID",
+            value: role.id
+          }
+        );
+
+    await sendLog(
+      role.guild,
+      "role_create_delete",
+      embed
+    );
+  }
+);
+
+/* =========================================================
+   ROLE UPDATE
+========================================================= */
+
+client.on(
+  "roleUpdate",
+  async (oldRole, newRole) => {
+
+    if (
+      oldRole.name !== newRole.name ||
+      oldRole.color !== newRole.color ||
+      oldRole.hoist !== newRole.hoist ||
+      oldRole.mentionable !==
+        newRole.mentionable
+    ) {
+
+      const embed =
+        logEmbed("✏️ تحديث رتبة")
+          .addFields(
+            {
+              name: "الرتبة",
+              value: `${newRole}`
+            },
+            {
+              name: "الاسم السابق",
+              value: oldRole.name
+            },
+            {
+              name: "الاسم الجديد",
+              value: newRole.name
+            }
+          );
+
+      await sendLog(
+        newRole.guild,
+        "role_update",
+        embed
       );
     }
 
-  } catch (error) {
+    if (
+      oldRole.permissions.bitfield !==
+      newRole.permissions.bitfield
+    ) {
 
-    console.error(
-      "❌ Message handler error:",
-      error.message
-    );
+      const embed =
+        logEmbed("🔐 تحديث صلاحيات رتبة")
+          .addFields({
+            name: "الرتبة",
+            value: `${newRole}`
+          });
+
+      await sendLog(
+        newRole.guild,
+        "role_permissions",
+        embed
+      );
+    }
   }
-});
+);
 
 /* =========================================================
-   PROCESS ERRORS
+   GUILD UPDATE
 ========================================================= */
 
-process.on("unhandledRejection", error => {
-  console.error("❌ Unhandled Rejection:", error);
-});
+client.on(
+  "guildUpdate",
+  async (oldGuild, newGuild) => {
 
-process.on("uncaughtException", error => {
-  console.error("❌ Uncaught Exception:", error);
-});
+    if (
+      oldGuild.name !== newGuild.name ||
+      oldGuild.icon !== newGuild.icon ||
+      oldGuild.banner !== newGuild.banner ||
+      oldGuild.description !==
+        newGuild.description ||
+      oldGuild.verificationLevel !==
+        newGuild.verificationLevel
+    ) {
+
+      const embed =
+        logEmbed("⚙️ تحديث إعدادات السيرفر")
+          .addFields(
+            {
+              name: "الاسم السابق",
+              value: oldGuild.name
+            },
+            {
+              name: "الاسم الجديد",
+              value: newGuild.name
+            }
+          );
+
+      await sendLog(
+        newGuild,
+        "guild_update",
+        embed
+      );
+    }
+  }
+);
+
+/* =========================================================
+   MESSAGE DELETE
+   يظهر الإداري الذي حذف الرسالة
+========================================================= */
+
+client.on(
+  "messageDelete",
+  async message => {
+
+    try {
+
+      if (!message.guild) return;
+
+      if (message.author?.bot) return;
+
+      let moderator = null;
+
+      try {
+
+        const logs =
+          await message.guild.fetchAuditLogs({
+            type: AuditLogEvent.MessageDelete,
+            limit: 10
+          });
+
+        const entry =
+          logs.entries.find(entry => {
+
+            if (!entry.target) {
+              return false;
+            }
+
+            if (
+              message.author &&
+              entry.target.id !==
+                message.author.id
+            ) {
+              return false;
+            }
+
+            return (
+              Date.now() -
+                entry.createdTimestamp <
+              10000
+            );
+          });
+
+        moderator =
+          entry?.executor || null;
+
+      } catch (error) {
+
+        console.log(
+          "⚠️ لم أستطع معرفة الإداري:",
+          error.message
+        );
+      }
+
+      const embed =
+        logEmbed("🗑️ حذف رسالة")
+          .addFields(
+            {
+              name: "العضو",
+              value:
+                message.author
+                  ? userText(message.author)
+                  : "غير معروف"
+            },
+            {
+              name: "الإداري",
+              value:
+                moderator
+                  ? userText(moderator)
+                  : "غير معروف"
+            },
+            {
+              name: "الروم",
+              value:
+                message.channel
+                  ? `${message.channel}`
+                  : "غير معروف"
+            },
+            {
+              name: "المحتوى",
+              value:
+                message.content
+                  ? message.content.slice(0, 1000)
+                  : "لا يوجد محتوى محفوظ"
+            }
+          );
+
+      await sendLog(
+        message.guild,
+        "message_delete",
+        embed
+      );
+
+    } catch (error) {
+
+      console.error(
+        "❌ خطأ حذف الرسالة:",
+        error
+      );
+    }
+  }
+);
+
+/* =========================================================
+   BULK DELETE
+========================================================= */
+
+client.on(
+  "messageDeleteBulk",
+  async messages => {
+
+    try {
+
+      const message =
+        messages.first();
+
+      if (!message?.guild) {
+        return;
+      }
+
+      let moderator = null;
+
+      try {
+
+        const logs =
+          await message.guild.fetchAuditLogs({
+            type: AuditLogEvent.MessageBulkDelete,
+            limit: 5
+          });
+
+        const entry =
+          logs.entries.find(entry =>
+            Date.now() -
+              entry.createdTimestamp <
+            10000
+          );
+
+        moderator =
+          entry?.executor || null;
+
+      } catch {}
+
+      const embed =
+        logEmbed("🧹 حذف مجموعة رسائل")
+          .addFields(
+            {
+              name: "عدد الرسائل",
+              value: `${messages.size}`
+            },
+            {
+              name: "الروم",
+              value: `${message.channel}`
+            },
+            {
+              name: "الإداري",
+              value:
+                moderator
+                  ? userText(moderator)
+                  : "غير معروف"
+            }
+          );
+
+      await sendLog(
+        message.guild,
+        "bulk_delete",
+        embed
+      );
+
+    } catch (error) {
+
+      console.error(
+        "❌ Bulk delete error:",
+        error
+      );
+    }
+  }
+);
+
+/* =========================================================
+   REACTION
+========================================================= */
+
+client.on(
+  "messageReactionAdd",
+  async (reaction, user) => {
+
+    if (user.bot) return;
+
+    if (!reaction.message.guild) {
+      return;
+    }
+
+    const embed =
+      logEmbed("😀 إضافة رياكشن")
+        .addFields(
+          {
+            name: "العضو",
+            value: userText(user)
+          },
+          {
+            name: "الرياكشن",
+            value:
+              reaction.emoji.toString()
+          },
+          {
+            name: "الروم",
+            value:
+              `${reaction.message.channel}`
+          }
+        );
+
+    await sendLog(
+      reaction.message.guild,
+      "reaction",
+      embed
+    );
+  }
+);
+
+/* =========================================================
+   EMOJI
+========================================================= */
+
+client.on(
+  "emojiCreate",
+  async emoji => {
+
+    const embed =
+      logEmbed("😀 إضافة إيموجي")
+        .addFields(
+          {
+            name: "الإيموجي",
+            value: `${emoji}`
+          },
+          {
+            name: "الاسم",
+            value:
+              emoji.name || "غير معروف"
+          }
+        );
+
+    await sendLog(
+      emoji.guild,
+      "emoji",
+      embed
+    );
+  }
+);
+
+client.on(
+  "emojiDelete",
+  async emoji => {
+
+    const embed =
+      logEmbed("🗑️ حذف إيموجي")
+        .addFields(
+          {
+            name: "الاسم",
+            value:
+              emoji.name || "غير معروف"
+          },
+          {
+            name: "ID",
+            value: emoji.id
+          }
+        );
+
+    await sendLog(
+      emoji.guild,
+      "emoji",
+      embed
+    );
+  }
+);
+
+client.on(
+  "emojiUpdate",
+  async (oldEmoji, newEmoji) => {
+
+    const embed =
+      logEmbed("✏️ تحديث إيموجي")
+        .addFields(
+          {
+            name: "الاسم السابق",
+            value:
+              oldEmoji.name || "غير معروف"
+          },
+          {
+            name: "الاسم الجديد",
+            value:
+              newEmoji.name || "غير معروف"
+          }
+        );
+
+    await sendLog(
+      newEmoji.guild,
+      "emoji",
+      embed
+    );
+  }
+);
+
+/* =========================================================
+   STICKERS
+========================================================= */
+
+client.on(
+  "stickerCreate",
+  async sticker => {
+
+    const embed =
+      logEmbed("🏷️ إضافة ستيكر")
+        .addFields(
+          {
+            name: "الاسم",
+            value: sticker.name
+          },
+          {
+            name: "ID",
+            value: sticker.id
+          }
+        );
+
+    await sendLog(
+      sticker.guild,
+      "sticker",
+      embed
+    );
+  }
+);
+
+client.on(
+  "stickerDelete",
+  async sticker => {
+
+    const embed =
+      logEmbed("🗑️ حذف ستيكر")
+        .addFields(
+          {
+            name: "الاسم",
+            value: sticker.name
+          },
+          {
+            name: "ID",
+            value: sticker.id
+          }
+        );
+
+    await sendLog(
+      sticker.guild,
+      "sticker",
+      embed
+    );
+  }
+);
+
+client.on(
+  "stickerUpdate",
+  async (oldSticker, newSticker) => {
+
+    const embed =
+      logEmbed("✏️ تحديث ستيكر")
+        .addFields(
+          {
+            name: "الاسم السابق",
+            value: oldSticker.name
+          },
+          {
+            name: "الاسم الجديد",
+            value: newSticker.name
+          }
+        );
+
+    await sendLog(
+      newSticker.guild,
+      "sticker",
+      embed
+    );
+  }
+);
+
+/* =========================================================
+   AUTO REPLY + SHORTCUT
+========================================================= */
+
+client.on(
+  "messageCreate",
+  async message => {
+
+    try {
+
+      if (!message.guild) return;
+
+      if (message.author.bot) return;
+
+      const content =
+        message.content.trim().toLowerCase();
+
+      const auto =
+        await db.query(
+          `
+          SELECT response
+          FROM autoreplies
+          WHERE guild_id = $1
+          AND trigger = $2
+          LIMIT 1
+          `,
+          [
+            message.guild.id,
+            content
+          ]
+        );
+
+      if (auto.rows[0]) {
+
+        await message.reply(
+          auto.rows[0].response
+        );
+
+        return;
+      }
+
+      const shortcut =
+        await db.query(
+          `
+          SELECT response
+          FROM shortcuts
+          WHERE guild_id = $1
+          AND name = $2
+          LIMIT 1
+          `,
+          [
+            message.guild.id,
+            content
+          ]
+        );
+
+      if (shortcut.rows[0]) {
+
+        await message.reply(
+          shortcut.rows[0].response
+        );
+      }
+
+    } catch (error) {
+
+      console.error(
+        "❌ Message error:",
+        error.message
+      );
+    }
+  }
+);
+
+/* =========================================================
+   ERRORS
+========================================================= */
+
+process.on(
+  "unhandledRejection",
+  error => {
+    console.error(
+      "❌ Unhandled Rejection:",
+      error
+    );
+  }
+);
+
+process.on(
+  "uncaughtException",
+  error => {
+    console.error(
+      "❌ Uncaught Exception:",
+      error
+    );
+  }
+);
 
 /* =========================================================
    START
@@ -3302,10 +3585,10 @@ process.on("uncaughtException", error => {
 
   } catch (error) {
 
-    console.error("=================================");
+    console.error("================================");
     console.error("❌ BOT START ERROR");
     console.error(error);
-    console.error("=================================");
+    console.error("================================");
 
     process.exit(1);
   }
