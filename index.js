@@ -12,9 +12,7 @@ const {
   MessageFlags,
   ActivityType,
   ActionRowBuilder,
-  StringSelectMenuBuilder,
-  ButtonBuilder,
-  ButtonStyle
+  StringSelectMenuBuilder
 } = require("discord.js");
 
 const { Pool } = require("pg");
@@ -104,16 +102,6 @@ async function setupDatabase() {
       enabled BOOLEAN NOT NULL DEFAULT TRUE,
       settings JSONB NOT NULL DEFAULT '{}'::jsonb
     )
-  `);
-
-  await pool.query(`
-    ALTER TABLE log_settings
-    ADD COLUMN IF NOT EXISTS enabled BOOLEAN NOT NULL DEFAULT TRUE
-  `);
-
-  await pool.query(`
-    ALTER TABLE log_settings
-    ADD COLUMN IF NOT EXISTS settings JSONB NOT NULL DEFAULT '{}'::jsonb
   `);
 
   await pool.query(`
@@ -254,33 +242,6 @@ async function sendLog(guild, type, title, description, fields = []) {
   }
 }
 
-async function getAuditExecutor(guild, type, filter = null) {
-  try {
-    const me = guild.members.me || await guild.members.fetchMe();
-
-    if (!me.permissions.has(PermissionFlagsBits.ViewAuditLog)) {
-      return null;
-    }
-
-    const logs = await guild.fetchAuditLogs({
-      type,
-      limit: 10
-    });
-
-    const now = Date.now();
-
-    const entry = logs.entries.find(e => {
-      if (!e.createdTimestamp) return false;
-      if (now - e.createdTimestamp > 20000) return false;
-      return filter ? filter(e) : true;
-    });
-
-    return entry?.executor || null;
-  } catch {
-    return null;
-  }
-}
-
 const messageCache = new Map();
 
 function cacheMessage(message) {
@@ -382,7 +343,7 @@ const commands = [
         .addRoleOption(o => o.setName("role").setDescription("الرتبة").setRequired(true))
     ),
 
-  new SlackCommandBuilder()
+  new SlashCommandBuilder()
     .setName("nickname")
     .setDescription("تغيير اسم عضو")
     .addUserOption(o => o.setName("user").setDescription("العضو").setRequired(true))
@@ -824,7 +785,7 @@ client.on("interactionCreate", async interaction => {
           return interaction.reply(`ℹ️ ${user} ليس لديه تحذيرات.`);
 
         const list = result.rows.map((w, i) =>
-          `**#${i + 1}** - ${w.reason || "بدون سبب"} (${w.moderator_id}) - ${new Date(w.created_at).toLocaleString()}`
+          `**#${i + 1}** - ${w.reason || "بدون سبب"} (تم بواسطة <@${w.moderator_id}>) - ${new Date(w.created_at).toLocaleString()}`
         ).join("\n");
 
         return interaction.reply({
@@ -864,6 +825,9 @@ client.on("interactionCreate", async interaction => {
         return deny(interaction, "❌ لا تملك صلاحية Manage Messages.");
 
       const amount = interaction.options.getInteger("amount");
+      
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
       const messages = await interaction.channel.bulkDelete(amount, true);
 
       await sendLog(
@@ -873,9 +837,8 @@ client.on("interactionCreate", async interaction => {
         `👤 الإداري: ${interaction.user}\n📊 العدد: ${messages.size}\n📍 الروم: ${interaction.channel}`
       );
 
-      const reply = await interaction.reply({
-        content: `✅ تم حذف ${messages.size} رسالة.`,
-        flags: MessageFlags.Ephemeral
+      const reply = await interaction.editReply({
+        content: `✅ تم حذف ${messages.size} رسالة.`
       });
 
       setTimeout(() => reply.delete().catch(() => {}), 3000);
@@ -974,7 +937,7 @@ client.on("interactionCreate", async interaction => {
         );
         return interaction.reply(`✅ تم إزالة ${role} من ${user}.`);
       }
-       }
+    }
 
     if (command === "nickname") {
       if (!hasPermission(interaction, PermissionFlagsBits.ManageNicknames))
@@ -1016,11 +979,11 @@ client.on("interactionCreate", async interaction => {
           { name: "👤 اسم في السيرفر", value: member.displayName, inline: true },
           { name: "📅 تاريخ الإنضمام", value: member.joinedAt ? member.joinedAt.toLocaleString() : "غير معروف", inline: true },
           { name: "📆 تاريخ الحساب", value: user.createdAt.toLocaleString(), inline: true },
-          { name: "🎖️ أعلى رتبة", value: member.roles.highest.toString(), inline: true },
+                    { name: "🎖️ أعلى رتبة", value: member.roles.highest.toString(), inline: true },
           { name: "📊 الرتب", value: member.roles.cache.size > 1 ? member.roles.cache.size - 1 : "لا يوجد", inline: true }
         );
 
-      if (user.banner) {
+      if (user.bannerURL) {
         embed.setImage(user.bannerURL({ dynamic: true, size: 1024 }));
       }
 
@@ -1043,7 +1006,7 @@ client.on("interactionCreate", async interaction => {
           { name: "👤 البشر", value: (guild.memberCount - guild.members.cache.filter(m => m.user.bot).size).toString(), inline: true }
         );
 
-      if (guild.banner) {
+      if (guild.bannerURL) {
         embed.setImage(guild.bannerURL({ dynamic: true, size: 1024 }));
       }
 
@@ -1070,7 +1033,7 @@ client.on("interactionCreate", async interaction => {
 
       const fetchedUser = await client.users.fetch(user.id, { force: true });
 
-      if (!fetchedUser.banner) {
+      if (!fetchedUser.bannerURL()) {
         return interaction.reply(`❌ ${user} ليس لديه بنر.`);
       }
 
