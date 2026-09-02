@@ -2004,6 +2004,58 @@ client.on(
             .getSubcommand();
 
         if (sub === "set") {
+  const name = interaction.options.getString("name").toLowerCase();
+  const response = interaction.options.getString("response");
+
+  await pool.query(
+    `INSERT INTO shortcuts (guild_id, name, response)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (guild_id, name)
+     DO UPDATE SET response = EXCLUDED.response`,
+    [guild.id, name, response]
+  );
+
+  return interaction.reply(`✅ تم حفظ الاختصار **${name}**.`);
+}
+
+if (sub === "remove") {
+  const name = interaction.options.getString("name").toLowerCase();
+
+  const result = await pool.query(
+    `DELETE FROM shortcuts
+     WHERE guild_id = $1 AND name = $2`,
+    [guild.id, name]
+  );
+
+  return interaction.reply(
+    result.rowCount
+      ? `🗑️ تم حذف الاختصار **${name}**.`
+      : "❌ الاختصار غير موجود."
+  );
+}
+
+const result = await pool.query(
+  `SELECT name, response
+   FROM shortcuts
+   WHERE guild_id = $1
+   ORDER BY name`,
+  [guild.id]
+);
+
+const text = result.rows.length
+  ? result.rows
+      .map(r => `**${r.name}** → ${limit(r.response, 300)}`)
+      .join("\n")
+  : "لا توجد اختصارات.";
+
+return interaction.reply({
+  embeds: [
+    new EmbedBuilder()
+      .setTitle("⚡ الاختصارات")
+      .setDescription(limit(text, 4000))
+      .setColor(WHITE)
+  ]
+});
                 await message.reply(ar.rows[0].response);
       return;
     }
