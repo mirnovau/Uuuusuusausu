@@ -1350,9 +1350,9 @@ client.on("messageCreate", async message => {
   cacheMessage(message);
 
   const shortcutResult = await pool.query(
-    `SELECT response FROM shortcuts WHERE guild_id=$1 AND name=$2`,
-    [message.guild.id, message.content.toLowerCase()]
-  );
+  `SELECT response FROM shortcuts WHERE guild_id=$1 AND shortcut=$2`,
+  [message.guild.id, message.content.toLowerCase()]
+); 
 
   if (shortcutResult.rows[0]) {
     await message.channel.send(shortcutResult.rows[0].response);
