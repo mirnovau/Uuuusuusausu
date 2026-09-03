@@ -88,6 +88,14 @@ function defaultSettings() {
 }
 
 async function setupDatabase() {
+  try {
+    await pool.query(`ALTER TABLE shortcuts ADD COLUMN IF NOT EXISTS response TEXT`);
+  } catch (e) {}
+  
+  try {
+    await pool.query(`ALTER TABLE autoreplies ADD COLUMN IF NOT EXISTS response TEXT`);
+  } catch (e) {}
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS log_channels (
       guild_id TEXT PRIMARY KEY,
@@ -494,7 +502,6 @@ client.on("interactionCreate", async interaction => {
     const guild = interaction.guild;
     const command = interaction.commandName;
 
-    // Defer reply for all commands except quick ones
     if (!["me", "bot", "serverinfo", "roles", "avatar", "banner", "info"].includes(command)) {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     }
@@ -974,8 +981,8 @@ client.on("interactionCreate", async interaction => {
         .addFields(
           { name: "🆔 ID", value: user.id, inline: true },
           { name: "📛 اسم", value: user.username, inline: true },
-          { name: "👤 اسم في السيرفر", value: member.displayName, inline: true },
-                    { name: "📅 تاريخ الإنضمام", value: member.joinedAt ? member.joinedAt.toLocaleString() : "غير معروف", inline: true },
+                    { name: "👤 اسم في السيرفر", value: member.displayName, inline: true },
+          { name: "📅 تاريخ الإنضمام", value: member.joinedAt ? member.joinedAt.toLocaleString() : "غير معروف", inline: true },
           { name: "📆 تاريخ الحساب", value: user.createdAt.toLocaleString(), inline: true },
           { name: "🎖️ أعلى رتبة", value: member.roles.highest.toString(), inline: true },
           { name: "📊 الرتب", value: member.roles.cache.size > 1 ? member.roles.cache.size - 1 : "لا يوجد", inline: true }
@@ -1342,7 +1349,6 @@ client.on("messageCreate", async message => {
 
   cacheMessage(message);
 
-  // التحقق من الاختصارات
   const shortcutResult = await pool.query(
     `SELECT response FROM shortcuts WHERE guild_id=$1 AND name=$2`,
     [message.guild.id, message.content.toLowerCase()]
@@ -1353,7 +1359,6 @@ client.on("messageCreate", async message => {
     return;
   }
 
-  // التحقق من الردود التلقائية
   const autoResult = await pool.query(
     `SELECT response FROM autoreplies WHERE guild_id=$1 AND trigger=$2`,
     [message.guild.id, message.content.toLowerCase()]
