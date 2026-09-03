@@ -8,7 +8,6 @@ const {
   REST,
   Routes,
   ChannelType,
-  AuditLogEvent,
   MessageFlags,
   ActivityType,
   ActionRowBuilder,
@@ -495,6 +494,11 @@ client.on("interactionCreate", async interaction => {
     const guild = interaction.guild;
     const command = interaction.commandName;
 
+    // Defer reply for all commands except quick ones
+    if (!["me", "bot", "serverinfo", "roles", "avatar", "banner", "info"].includes(command)) {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    }
+
     if (command === "me") {
       return interaction.reply({
         embeds: [
@@ -536,7 +540,7 @@ client.on("interactionCreate", async interaction => {
 
         await getConfig(guild.id);
 
-        await interaction.reply(`✅ تم تحديد ${channel} كروم اللوق.`);
+        await interaction.editReply(`✅ تم تحديد ${channel} كروم اللوق.`);
 
         await sendLog(
           guild,
@@ -553,7 +557,7 @@ client.on("interactionCreate", async interaction => {
         const active = Object.values(cfg.settings).filter(Boolean).length;
         const total = Object.keys(LOG_TYPES).length;
 
-        return interaction.reply({
+        return interaction.editReply({
           embeds: [
             new EmbedBuilder()
               .setColor(WHITE)
@@ -588,7 +592,7 @@ client.on("interactionCreate", async interaction => {
           [guild.id, JSON.stringify(defaultSettings())]
         );
 
-        return interaction.reply("🟢 تم تشغيل اللوق.");
+        return interaction.editReply("🟢 تم تشغيل اللوق.");
       }
 
       if (sub === "disable") {
@@ -600,7 +604,7 @@ client.on("interactionCreate", async interaction => {
           [guild.id, JSON.stringify(defaultSettings())]
         );
 
-        return interaction.reply("🔴 تم إيقاف اللوق.");
+        return interaction.editReply("🔴 تم إيقاف اللوق.");
       }
 
       if (sub === "edit") {
@@ -621,10 +625,9 @@ client.on("interactionCreate", async interaction => {
 
         const row = new ActionRowBuilder().addComponents(menu);
 
-        return interaction.reply({
+        return interaction.editReply({
           content: "اختر نوع اللوق لتفعيله أو تعطيله:",
-          components: [row],
-          flags: MessageFlags.Ephemeral
+          components: [row]
         });
       }
     }
@@ -650,7 +653,7 @@ client.on("interactionCreate", async interaction => {
         `👤 العضو: ${userText(user)}\n🛡️ الإداري: ${interaction.user}\n📝 السبب: ${reason}`
       );
 
-      return interaction.reply(`✅ تم حظر ${user}.\n📝 السبب: ${reason}`);
+      return interaction.editReply(`✅ تم حظر ${user}.\n📝 السبب: ${reason}`);
     }
 
     if (command === "unban") {
@@ -675,7 +678,7 @@ client.on("interactionCreate", async interaction => {
         `👤 العضو: ${userText(bannedUser.user)}\n🛡️ الإداري: ${interaction.user}\n📝 السبب: ${reason}`
       );
 
-      return interaction.reply(`✅ تم فك حظر ${bannedUser.user}.\n📝 السبب: ${reason}`);
+      return interaction.editReply(`✅ تم فك حظر ${bannedUser.user}.\n📝 السبب: ${reason}`);
     }
 
     if (command === "kick") {
@@ -699,7 +702,7 @@ client.on("interactionCreate", async interaction => {
         `👤 العضو: ${userText(user)}\n🛡️ الإداري: ${interaction.user}\n📝 السبب: ${reason}`
       );
 
-      return interaction.reply(`✅ تم طرد ${user}.\n📝 السبب: ${reason}`);
+      return interaction.editReply(`✅ تم طرد ${user}.\n📝 السبب: ${reason}`);
     }
 
     if (command === "timeout") {
@@ -724,7 +727,7 @@ client.on("interactionCreate", async interaction => {
         `👤 العضو: ${userText(user)}\n🛡️ الإداري: ${interaction.user}\n⏱️ المدة: ${minutes} دقيقة\n📝 السبب: ${reason}`
       );
 
-      return interaction.reply(`✅ تم وضع تايم أوت لـ ${user} لمدة ${minutes} دقيقة.\n📝 السبب: ${reason}`);
+      return interaction.editReply(`✅ تم وضع تايم أوت لـ ${user} لمدة ${minutes} دقيقة.\n📝 السبب: ${reason}`);
     }
 
     if (command === "untimeout") {
@@ -746,7 +749,7 @@ client.on("interactionCreate", async interaction => {
         `👤 العضو: ${userText(user)}\n🛡️ الإداري: ${interaction.user}`
       );
 
-      return interaction.reply(`✅ تم إزالة التايم أوت عن ${user}.`);
+      return interaction.editReply(`✅ تم إزالة التايم أوت عن ${user}.`);
     }
 
     if (command === "warn") {
@@ -769,7 +772,7 @@ client.on("interactionCreate", async interaction => {
         `👤 العضو: ${userText(user)}\n🛡️ الإداري: ${interaction.user}\n📝 السبب: ${reason}`
       );
 
-      return interaction.reply(`✅ تم تحذير ${user}.\n📝 السبب: ${reason}`);
+      return interaction.editReply(`✅ تم تحذير ${user}.\n📝 السبب: ${reason}`);
     }
 
     if (command === "warnlist") {
@@ -782,13 +785,13 @@ client.on("interactionCreate", async interaction => {
         );
 
         if (result.rows.length === 0)
-          return interaction.reply(`ℹ️ ${user} ليس لديه تحذيرات.`);
+          return interaction.editReply(`ℹ️ ${user} ليس لديه تحذيرات.`);
 
         const list = result.rows.map((w, i) =>
           `**#${i + 1}** - ${w.reason || "بدون سبب"} (تم بواسطة <@${w.moderator_id}>) - ${new Date(w.created_at).toLocaleString()}`
         ).join("\n");
 
-        return interaction.reply({
+        return interaction.editReply({
           embeds: [
             new EmbedBuilder()
               .setColor(WHITE)
@@ -803,13 +806,13 @@ client.on("interactionCreate", async interaction => {
         );
 
         if (result.rows.length === 0)
-          return interaction.reply("ℹ️ لا توجد تحذيرات في السيرفر.");
+          return interaction.editReply("ℹ️ لا توجد تحذيرات في السيرفر.");
 
         const list = result.rows.map((row, i) =>
           `**#${i + 1}** - <@${row.user_id}> - ${row.count} تحذيرات`
         ).join("\n");
 
-        return interaction.reply({
+        return interaction.editReply({
           embeds: [
             new EmbedBuilder()
               .setColor(WHITE)
@@ -825,9 +828,6 @@ client.on("interactionCreate", async interaction => {
         return deny(interaction, "❌ لا تملك صلاحية Manage Messages.");
 
       const amount = interaction.options.getInteger("amount");
-      
-      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-
       const messages = await interaction.channel.bulkDelete(amount, true);
 
       await sendLog(
@@ -837,11 +837,9 @@ client.on("interactionCreate", async interaction => {
         `👤 الإداري: ${interaction.user}\n📊 العدد: ${messages.size}\n📍 الروم: ${interaction.channel}`
       );
 
-      const reply = await interaction.editReply({
-        content: `✅ تم حذف ${messages.size} رسالة.`
-      });
-
-      setTimeout(() => reply.delete().catch(() => {}), 3000);
+      await interaction.editReply(`✅ تم حذف ${messages.size} رسالة.`);
+      
+      setTimeout(() => interaction.deleteReply().catch(() => {}), 3000);
     }
 
     if (command === "lock") {
@@ -861,7 +859,7 @@ client.on("interactionCreate", async interaction => {
         `👤 الإداري: ${interaction.user}\n📍 الروم: ${channel}`
       );
 
-      return interaction.reply(`🔒 تم قفل ${channel}.`);
+      return interaction.editReply(`🔒 تم قفل ${channel}.`);
     }
 
     if (command === "unlock") {
@@ -881,7 +879,7 @@ client.on("interactionCreate", async interaction => {
         `👤 الإداري: ${interaction.user}\n📍 الروم: ${channel}`
       );
 
-      return interaction.reply(`🔓 تم فتح ${channel}.`);
+      return interaction.editReply(`🔓 تم فتح ${channel}.`);
     }
 
     if (command === "slowmode") {
@@ -899,7 +897,7 @@ client.on("interactionCreate", async interaction => {
         `👤 الإداري: ${interaction.user}\n⏱️ المدة: ${seconds} ثانية\n📍 الروم: ${interaction.channel}`
       );
 
-      return interaction.reply(`✅ تم تغيير Slowmode إلى ${seconds} ثانية.`);
+      return interaction.editReply(`✅ تم تغيير Slowmode إلى ${seconds} ثانية.`);
     }
 
     if (command === "role") {
@@ -926,7 +924,7 @@ client.on("interactionCreate", async interaction => {
           "➕ إضافة رتبة",
           `👤 العضو: ${userText(user)}\n🛡️ الإداري: ${interaction.user}\n🎖️ الرتبة: ${role}`
         );
-        return interaction.reply(`✅ تم إضافة ${role} لـ ${user}.`);
+        return interaction.editReply(`✅ تم إضافة ${role} لـ ${user}.`);
       } else if (sub === "remove") {
         await member.roles.remove(role);
         await sendLog(
@@ -935,7 +933,7 @@ client.on("interactionCreate", async interaction => {
           "➖ إزالة رتبة",
           `👤 العضو: ${userText(user)}\n🛡️ الإداري: ${interaction.user}\n🎖️ الرتبة: ${role}`
         );
-        return interaction.reply(`✅ تم إزالة ${role} من ${user}.`);
+        return interaction.editReply(`✅ تم إزالة ${role} من ${user}.`);
       }
     }
 
@@ -960,7 +958,7 @@ client.on("interactionCreate", async interaction => {
         `👤 العضو: ${userText(user)}\n🛡️ الإداري: ${interaction.user}\n📛 الاسم الجديد: ${name}`
       );
 
-      return interaction.reply(`✅ تم تغيير اسم ${user} إلى ${name}.`);
+      return interaction.editReply(`✅ تم تغيير اسم ${user} إلى ${name}.`);
     }
 
     if (command === "info") {
@@ -977,9 +975,9 @@ client.on("interactionCreate", async interaction => {
           { name: "🆔 ID", value: user.id, inline: true },
           { name: "📛 اسم", value: user.username, inline: true },
           { name: "👤 اسم في السيرفر", value: member.displayName, inline: true },
-          { name: "📅 تاريخ الإنضمام", value: member.joinedAt ? member.joinedAt.toLocaleString() : "غير معروف", inline: true },
+                    { name: "📅 تاريخ الإنضمام", value: member.joinedAt ? member.joinedAt.toLocaleString() : "غير معروف", inline: true },
           { name: "📆 تاريخ الحساب", value: user.createdAt.toLocaleString(), inline: true },
-                    { name: "🎖️ أعلى رتبة", value: member.roles.highest.toString(), inline: true },
+          { name: "🎖️ أعلى رتبة", value: member.roles.highest.toString(), inline: true },
           { name: "📊 الرتب", value: member.roles.cache.size > 1 ? member.roles.cache.size - 1 : "لا يوجد", inline: true }
         );
 
@@ -1110,7 +1108,7 @@ client.on("interactionCreate", async interaction => {
           [guild.id, trigger, response]
         );
 
-        return interaction.reply(`✅ تم إضافة الرد التلقائي.\n📌 الكلمة: \`${trigger}\`\n📝 الرد: ${response}`);
+        return interaction.editReply(`✅ تم إضافة الرد التلقائي.\n📌 الكلمة: \`${trigger}\`\n📝 الرد: ${response}`);
       }
 
       if (sub === "remove") {
@@ -1122,9 +1120,9 @@ client.on("interactionCreate", async interaction => {
         );
 
         if (result.rowCount === 0)
-          return interaction.reply(`❌ لا يوجد رد تلقائي للكلمة \`${trigger}\`.`);
+          return interaction.editReply(`❌ لا يوجد رد تلقائي للكلمة \`${trigger}\`.`);
 
-        return interaction.reply(`✅ تم حذف الرد التلقائي للكلمة \`${trigger}\`.`);
+        return interaction.editReply(`✅ تم حذف الرد التلقائي للكلمة \`${trigger}\`.`);
       }
 
       if (sub === "list") {
@@ -1134,13 +1132,13 @@ client.on("interactionCreate", async interaction => {
         );
 
         if (result.rows.length === 0)
-          return interaction.reply("ℹ️ لا توجد ردود تلقائية.");
+          return interaction.editReply("ℹ️ لا توجد ردود تلقائية.");
 
         const list = result.rows.map((r, i) =>
           `**#${i + 1}** \`${r.trigger}\` → ${r.response}`
         ).join("\n");
 
-        return interaction.reply({
+        return interaction.editReply({
           embeds: [
             new EmbedBuilder()
               .setColor(WHITE)
@@ -1169,7 +1167,7 @@ client.on("interactionCreate", async interaction => {
           [guild.id, name, response]
         );
 
-        return interaction.reply(`✅ تم إضافة الاختصار.\n📌 الاسم: \`${name}\`\n📝 الرد: ${response}`);
+        return interaction.editReply(`✅ تم إضافة الاختصار.\n📌 الاسم: \`${name}\`\n📝 الرد: ${response}`);
       }
 
       if (sub === "remove") {
@@ -1181,9 +1179,9 @@ client.on("interactionCreate", async interaction => {
         );
 
         if (result.rowCount === 0)
-          return interaction.reply(`❌ لا يوجد اختصار باسم \`${name}\`.`);
+          return interaction.editReply(`❌ لا يوجد اختصار باسم \`${name}\`.`);
 
-        return interaction.reply(`✅ تم حذف الاختصار \`${name}\`.`);
+        return interaction.editReply(`✅ تم حذف الاختصار \`${name}\`.`);
       }
 
       if (sub === "list") {
@@ -1193,13 +1191,13 @@ client.on("interactionCreate", async interaction => {
         );
 
         if (result.rows.length === 0)
-          return interaction.reply("ℹ️ لا توجد اختصارات.");
+          return interaction.editReply("ℹ️ لا توجد اختصارات.");
 
         const list = result.rows.map((r, i) =>
           `**#${i + 1}** \`${r.name}\` → ${r.response}`
         ).join("\n");
 
-        return interaction.reply({
+        return interaction.editReply({
           embeds: [
             new EmbedBuilder()
               .setColor(WHITE)
@@ -1250,7 +1248,7 @@ client.on("interactionCreate", async interaction => {
           [guild.id]
         );
 
-        return interaction.reply("🛡️ تم تفعيل حماية السيرفر.");
+        return interaction.editReply("🛡️ تم تفعيل حماية السيرفر.");
       }
 
       if (sub === "disable") {
@@ -1262,7 +1260,7 @@ client.on("interactionCreate", async interaction => {
           [guild.id]
         );
 
-        return interaction.reply("🛡️ تم تعطيل حماية السيرفر.");
+        return interaction.editReply("🛡️ تم تعطيل حماية السيرفر.");
       }
 
       if (sub === "status") {
@@ -1273,7 +1271,7 @@ client.on("interactionCreate", async interaction => {
 
         const enabled = result.rows[0]?.enabled || false;
 
-        return interaction.reply(`🛡️ حماية السيرفر: ${enabled ? "🟢 مفعلة" : "🔴 معطلة"}`);
+        return interaction.editReply(`🛡️ حماية السيرفر: ${enabled ? "🟢 مفعلة" : "🔴 معطلة"}`);
       }
     }
 
@@ -1284,6 +1282,8 @@ client.on("interactionCreate", async interaction => {
         content: "❌ حدث خطأ أثناء تنفيذ الأمر.",
         flags: MessageFlags.Ephemeral
       }).catch(() => {});
+    } else if (interaction.deferred && !interaction.replied) {
+      await interaction.editReply("❌ حدث خطأ أثناء تنفيذ الأمر.").catch(() => {});
     }
   }
 });
